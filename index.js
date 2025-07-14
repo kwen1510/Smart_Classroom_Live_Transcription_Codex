@@ -551,13 +551,25 @@ app.get("/history", (req, res) => {
                                                 <h5 class="font-medium text-gray-900 mb-2">Transcripts</h5>
                                                 <div class="space-y-3">
                                                     \${(() => {
-                                                        const transcripts = group.transcripts || [];
-                                                        const latestTranscript = transcripts.length ? transcripts[transcripts.length - 1] : null;
-                                                        const previousTranscripts = transcripts.length > 1 ? transcripts.slice(0, -1).reverse() : [];
-                                                        
-                                                        let html = '';
-                                                        
-                                                        // Show latest transcript at the top (highlighted)
+                                                    const transcripts = group.transcripts || [];
+                                                    const fullText = transcripts.map(t => t.text).join(' ');
+                                                    const latestTranscript = transcripts.length ? transcripts[transcripts.length - 1] : null;
+                                                    const previousTranscripts = transcripts.length > 1 ? transcripts.slice(0, -1).reverse() : [];
+
+                                                    let html = '';
+
+                                                    if (fullText) {
+                                                        html += `
+                                                            <div class="bg-blue-50 rounded-lg p-4 border-l-4 border-blue-400 mb-4">
+                                                                <div class="flex items-center mb-2">
+                                                                    <span class="text-xs font-medium text-blue-600 bg-blue-100 px-2 py-1 rounded uppercase tracking-wide">Full Conversation</span>
+                                                                </div>
+                                                                <div class="text-gray-800 mb-2 font-medium leading-relaxed whitespace-pre-line">${fullText}</div>
+                                                            </div>
+                                                        `;
+                                                    }
+
+                                                    // Show latest transcript at the top (highlighted)
                                                         if (latestTranscript) {
                                                             html += \`
                                                                 <div class="bg-blue-50 rounded-lg p-4 border-l-4 border-blue-400 mb-4">
@@ -638,10 +650,14 @@ app.get("/history", (req, res) => {
         }
 
         function formatDuration(seconds) {
-            if (!seconds) return '0:00';
-            const mins = Math.floor(seconds / 60);
-            const secs = Math.floor(seconds % 60);
-            return \`\${mins}:\${secs.toString().padStart(2, '0')}\`;
+            seconds = Math.floor(seconds || 0);
+            const hrs = Math.floor(seconds / 3600);
+            const mins = Math.floor((seconds % 3600) / 60);
+            const secs = seconds % 60;
+            if (hrs > 0) {
+                return `${hrs}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+            }
+            return `${mins}:${secs.toString().padStart(2, '0')}`;
         }
 
         // Close modal when clicking outside
@@ -889,9 +905,26 @@ app.post("/api/session/:code/prompt", express.json(), async (req, res) => {
     }
     
     // Get session ID
-    const session = await db.collection("sessions").findOne({ code: code });
+    let session = await db.collection("sessions").findOne({ code: code });
     if (!session) {
-      return res.status(404).json({ error: "Session not found" });
+      // Session might not be persisted yet - create a placeholder record
+      const mem = activeSessions.get(code);
+      if (!mem) {
+        return res.status(404).json({ error: "Session not found" });
+      }
+
+      const newId = uuid();
+      await db.collection("sessions").insertOne({
+        _id: newId,
+        code: code,
+        interval_ms: mem.interval || 30000,
+        created_at: mem.created_at || Date.now(),
+        active: mem.active || false,
+        start_time: mem.startTime || null,
+        end_time: null,
+        total_duration_seconds: null
+      });
+      session = { _id: newId };
     }
     
     // Save prompt for this session
@@ -917,7 +950,7 @@ app.get("/api/session/:code/prompt", async (req, res) => {
     // Get session ID
     const session = await db.collection("sessions").findOne({ code: code });
     if (!session) {
-      return res.status(404).json({ error: "Session not found" });
+      return res.json({ prompt: null, message: "No custom prompt set for this session" });
     }
     
     // Get prompt for this session
@@ -1062,7 +1095,10 @@ app.post("/api/session/:code/start", express.json(), async (req, res) => {
     sessionState.active = true;
     sessionState.interval = interval || 30000;
     sessionState.startTime = startTime;
-    
+
+    // Notify all clients to reset their local state before recording starts
+    io.to(code).emit("session_reset");
+
     io.to(code).emit("record_now", interval || 30000);
     
     console.log(`▶️  Session ${code} started recording (interval: ${interval || 30000}ms)`);
