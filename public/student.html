@@ -90,7 +90,7 @@
                                     <span id="connectionText" class="text-xs font-medium text-white/90">Connected</span>
                                 </div>
                             </h1>
-                            <p class="text-white/80 text-sm">Session: <span id="activeSession" class="font-mono">-</span> | Group: <span id="activeGroup">-</span></p>
+                            <p class="text-white/80 text-sm">Session: <span id="activeSession" class="font-mono">-</span> | Group: <span id="activeGroup">-</span> | Elapsed: <span id="timeElapsed">0:00</span></p>
                         </div>
                     </div>
                     <div class="flex items-center space-x-4">
@@ -202,6 +202,20 @@
         let lastHeartbeatTime = Date.now();
         let isConnected = true;
         let hasJoinedSession = false;
+        let elapsedInterval = null;
+        let recordingStart = null;
+
+        function resetView() {
+            document.getElementById('latestTranscript').innerHTML = '';
+            document.getElementById('olderTranscripts').innerHTML = '';
+            summaryArea.innerHTML = '';
+            summaryTimestamp.classList.add('hidden');
+            document.getElementById('timeElapsed').textContent = '0:00';
+            if (elapsedInterval) {
+                clearInterval(elapsedInterval);
+                elapsedInterval = null;
+            }
+        }
         
         // Initialize Lucide icons
         document.addEventListener('DOMContentLoaded', () => {
@@ -329,8 +343,8 @@
         async function startRecording() {
             try {
                 console.log("🎤 Starting recording...");
-                
-                stream = await navigator.mediaDevices.getUserMedia({ 
+
+                stream = await navigator.mediaDevices.getUserMedia({
                     audio: {
                         echoCancellation: true,
                         noiseSuppression: true,
@@ -340,7 +354,17 @@
                 
                 isRecording = true;
                 updateStatus(isPageVisible ? "Recording..." : "Recording in background...", "recording");
-                
+
+                recordingStart = Date.now();
+                elapsedInterval = setInterval(() => {
+                    const elapsed = Math.floor((Date.now() - recordingStart) / 1000);
+                    const m = Math.floor(elapsed / 60);
+                    const s = elapsed % 60;
+                    document.getElementById('timeElapsed').textContent = `${m}:${s.toString().padStart(2,'0')}`;
+                }, 1000);
+
+                resetView();
+
                 // Start the first recording cycle
                 startRecordingCycle();
                 
@@ -552,6 +576,12 @@
                 if (mediaRecorder && mediaRecorder.state === 'recording') {
                     mediaRecorder.stop();
                 }
+
+                if (elapsedInterval) {
+                    clearInterval(elapsedInterval);
+                    elapsedInterval = null;
+                }
+                document.getElementById('timeElapsed').textContent = '0:00';
                 
                 // Stop the stream
                 if (stream) {
@@ -756,6 +786,11 @@
         socket.on('stop_recording', () => {
             console.log(`🛑 Session stopped recording${isPageVisible ? '' : ' [BACKGROUND]'}`);
             stopRecording();
+        });
+
+        socket.on('session_reset', () => {
+            console.log('Session reset received');
+            resetView();
         });
 
         socket.on('transcription_and_summary', (data) => {

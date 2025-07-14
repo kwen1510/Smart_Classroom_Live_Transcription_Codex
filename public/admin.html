@@ -119,6 +119,7 @@
                                 <div id="connectionDot" class="w-2 h-2 bg-green-400 rounded-full animate-ping-slow"></div>
                                 <span id="connectionText" class="text-xs font-medium text-white">Connected</span>
                             </div>
+                            <p class="text-white/90 text-sm">Elapsed: <span id="timeElapsed">0:00</span></p>
                         </div>
                     </div>
                 </div>
@@ -260,10 +261,24 @@
     const socket = io();
     let sessionCode = null;
     const groups = new Map();
+    let elapsedInterval = null;
+    let recordingStart = null;
     let heartbeatInterval = null;
     let connectionCheckInterval = null;
     let lastHeartbeatTime = Date.now();
     let isConnected = true;
+
+    function resetUI() {
+        groups.clear();
+        document.getElementById('groupsGrid').innerHTML = '';
+        document.getElementById('groupsGrid').classList.add('hidden');
+        document.getElementById('emptyState').classList.remove('hidden');
+        document.getElementById('timeElapsed').textContent = '0:00';
+        if (elapsedInterval) {
+            clearInterval(elapsedInterval);
+            elapsedInterval = null;
+        }
+    }
     
     // Error handling
     function showErrorToast(message) {
@@ -875,8 +890,11 @@
         updateGroup(group, { isActive: true });
         
         // Fetch existing data for this group
-        fetch(`/api/session/${sessionCode}/group/${group}/transcripts`)
-            .then(res => res.json())
+        fetch(`/api/transcripts/${sessionCode}/${group}`)
+            .then(async res => {
+                if (!res.ok) return { transcripts: [], summary: null, stats: {} };
+                return res.json();
+            })
             .then(data => {
                 // Format existing transcripts with proper structure
                 const formattedTranscripts = data.transcripts.map(t => ({
@@ -940,6 +958,11 @@
             isActive: true
         });
     });
+
+    socket.on('session_reset', () => {
+        console.log('Session reset received');
+        resetUI();
+    });
     
     // Heartbeat and connection event handlers
     socket.on('admin_heartbeat_ack', () => {
@@ -1000,7 +1023,17 @@
             // Disable interval input while recording
             document.getElementById('intervalInput').disabled = true;
             document.getElementById('intervalInput').classList.add('opacity-50', 'cursor-not-allowed');
-            
+
+            recordingStart = Date.now();
+            elapsedInterval = setInterval(() => {
+                const elapsed = Math.floor((Date.now() - recordingStart) / 1000);
+                const m = Math.floor(elapsed / 60);
+                const s = elapsed % 60;
+                document.getElementById('timeElapsed').textContent = `${m}:${s.toString().padStart(2,'0')}`;
+            }, 1000);
+
+            resetUI();
+
             showTemporaryMessage('Recording started successfully!', 'success');
         } catch (err) {
             console.error('Failed to start session:', err);
@@ -1024,7 +1057,12 @@
             // Re-enable interval input
             document.getElementById('intervalInput').disabled = false;
             document.getElementById('intervalInput').classList.remove('opacity-50', 'cursor-not-allowed');
-            
+
+            if (elapsedInterval) {
+                clearInterval(elapsedInterval);
+                elapsedInterval = null;
+            }
+            document.getElementById('timeElapsed').textContent = '0:00';
             showTemporaryMessage('Recording stopped successfully!', 'success');
         } catch (err) {
             console.error('Failed to stop session:', err);
