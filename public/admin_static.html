@@ -425,8 +425,10 @@
     // Default prompt
     const DEFAULT_PROMPT = "Summarise the following classroom discussion in ≤6 clear bullet points:";
     
-    // Create new session on page load
-    fetch('/api/new-session')
+    // Create or join static session on page load
+    const urlParams = new URLSearchParams(window.location.search);
+    sessionCode = urlParams.get('code') || '123456';
+    fetch(`/api/new-session?code=${sessionCode}`)
         .then(res => res.json())
         .then(data => {
             sessionCode = data.code;
