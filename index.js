@@ -89,6 +89,10 @@ app.get("/admin", (req, res) => {
   console.log("👨‍🏫 Serving admin page");
   res.sendFile(path.join(__dirname, "public", "admin.html"));
 });
+app.get("/admin_static", (req, res) => {
+  console.log("👨‍🏫 Serving static admin page");
+  res.sendFile(path.join(__dirname, "public", "admin_static.html"));
+});
 
 /* Serve test transcription page */
 app.get("/test-transcription", (req, res) => {
@@ -276,7 +280,7 @@ app.get("/api/session/:code/prompt", async (req, res) => {
 app.get("/api/new-session", async (req, res) => {
   try {
     const id = uuid();
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    const code = req.query.code || Math.floor(100000 + Math.random() * 900000).toString();
     const interval = Number(req.query.interval) || 30000;
     
     // Clear any existing session with same code (unlikely but safe)
