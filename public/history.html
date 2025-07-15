@@ -185,6 +185,10 @@
                 });
 
                 const response = await fetch(`/api/history?${params}`);
+                if (!response.ok) {
+                    const text = await response.text();
+                    throw new Error(text || `HTTP ${response.status}`);
+                }
                 const data = await response.json();
 
                 displaySessions(data);
@@ -371,6 +375,10 @@
 
             try {
                 const response = await fetch(`/api/history/session/${sessionCode}`);
+                if (!response.ok) {
+                    const text = await response.text();
+                    throw new Error(text || `HTTP ${response.status}`);
+                }
                 const data = await response.json();
                 
                 content.innerHTML = `
@@ -677,6 +685,10 @@ This action cannot be undone.`;
                     })
                 });
 
+                if (!response.ok) {
+                    const text = await response.text();
+                    throw new Error(text || `HTTP ${response.status}`);
+                }
                 const result = await response.json();
 
                 if (response.ok) {
