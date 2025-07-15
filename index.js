@@ -56,7 +56,8 @@ async function connectToDatabase() {
     console.log("📊 Database indexes ready");
 
     // Start server ONLY after DB is ready!
-    http.listen(8080, () => console.log("🎯 Server running at http://localhost:8080"));
+    const port = process.env.PORT || 8080;
+    http.listen(port, () => console.log(`🎯 Server running at http://localhost:${port}`));
   } catch (error) {
     console.error("❌ Failed to connect to MongoDB:", error);
     process.exit(1);
