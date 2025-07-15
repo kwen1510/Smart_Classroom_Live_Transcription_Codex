@@ -105,6 +105,37 @@ cp .env.example .env  # Create your .env file
 npm start
 ```
 
+
+## API Endpoints
+
+### Session Management
+- `GET /api/new-session` - create a new session
+- `GET /api/session/:code/status` - get session status
+- `POST /api/session/:code/start` - start recording
+- `POST /api/session/:code/stop` - stop recording
+- `POST /api/session/:code/prompt` - save a custom prompt
+- `GET /api/session/:code/prompt` - load the prompt for a session
+
+### Student Upload
+- `POST /api/transcribe-chunk` - upload a 30s audio chunk
+
+### Data Retrieval
+- `GET /api/transcripts/:code/:number` - transcripts and summary for a group
+- `GET /api/history` - list sessions (use query params for filters)
+- `GET /api/history/session/:code` - detailed session info
+- `DELETE /api/sessions` - delete sessions (provide \`sessionCodes\` array)
+
+### Testing
+- `POST /api/test-transcription` - transcribe an uploaded audio file
+- `POST /api/test-summary` - summarise supplied text
+
+### Web Pages
+- `/admin` teacher dashboard
+- `/admin_static` static admin dashboard
+- `/student` student interface
+- `/history` session history
+- `/test-transcription` demo transcription page
+- `/test-recording` demo recorder page
 ## 🐛 Troubleshooting
 
 ### Common Issues:
