@@ -2,7 +2,7 @@ import 'dotenv/config';
 import express from "express";
 import { createServer } from "http";
 import { Server } from "socket.io";
-import { MongoClient, ServerApiVersion } from 'mongodb';
+import { MongoClient, ServerApiVersion, ObjectId } from 'mongodb';
 import { v4 as uuid } from "uuid";
 import fetch from "node-fetch";
 import path from "path";
@@ -52,6 +52,7 @@ async function connectToDatabase() {
     await db.collection("transcripts").createIndex({ "group_id": 1, "segment_number": 1 });
     await db.collection("summaries").createIndex({ "group_id": 1 }, { unique: true });
     await db.collection("session_prompts").createIndex({ "session_id": 1 }, { unique: true });
+    await db.collection("prompt_library").createIndex({ name: 1 });
     
     console.log("📊 Database indexes ready");
 
@@ -273,6 +274,68 @@ app.get("/api/session/:code/prompt", async (req, res) => {
   } catch (err) {
     console.error("❌ Failed to load prompt:", err);
     res.status(500).json({ error: "Failed to load prompt" });
+  }
+});
+
+/* Prompt library management */
+app.get("/api/prompt-library", async (req, res) => {
+  try {
+    const prompts = await db
+      .collection("prompt_library")
+      .find({})
+      .sort({ name: 1 })
+      .toArray();
+    res.json(prompts);
+  } catch (err) {
+    console.error("❌ Failed to load prompt library:", err);
+    res.status(500).json({ error: "Failed to load prompt library" });
+  }
+});
+
+app.post("/api/prompt-library", express.json(), async (req, res) => {
+  try {
+    const { name, text } = req.body;
+    if (!name || !text) {
+      return res.status(400).json({ error: "Name and text are required" });
+    }
+    const result = await db
+      .collection("prompt_library")
+      .insertOne({ name: name.trim(), text: text.trim() });
+    res.json({ _id: result.insertedId, name: name.trim(), text: text.trim() });
+  } catch (err) {
+    console.error("❌ Failed to save prompt to library:", err);
+    res.status(500).json({ error: "Failed to save prompt" });
+  }
+});
+
+app.put("/api/prompt-library/:id", express.json(), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, text } = req.body;
+    if (!name && !text) {
+      return res.status(400).json({ error: "Nothing to update" });
+    }
+    const update = {};
+    if (name) update.name = name.trim();
+    if (text) update.text = text.trim();
+    await db
+      .collection("prompt_library")
+      .updateOne({ _id: new ObjectId(id) }, { $set: update });
+    res.json({ success: true });
+  } catch (err) {
+    console.error("❌ Failed to update prompt:", err);
+    res.status(500).json({ error: "Failed to update prompt" });
+  }
+});
+
+app.delete("/api/prompt-library/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    await db.collection("prompt_library").deleteOne({ _id: new ObjectId(id) });
+    res.json({ success: true });
+  } catch (err) {
+    console.error("❌ Failed to delete prompt:", err);
+    res.status(500).json({ error: "Failed to delete prompt" });
   }
 });
 
