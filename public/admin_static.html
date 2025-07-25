@@ -281,12 +281,24 @@
     let connectionCheckInterval = null;
     let lastHeartbeatTime = Date.now();
     let isConnected = true;
+    let promptLibrary = [];
 
-    function resetUI() {
-        groups.clear();
-        document.getElementById('groupsGrid').innerHTML = '';
-        document.getElementById('groupsGrid').classList.add('hidden');
-        document.getElementById('emptyState').classList.remove('hidden');
+    function resetUI(preserveGroups = false) {
+        if (!preserveGroups) {
+            groups.clear();
+            document.getElementById('groupsGrid').innerHTML = '';
+            document.getElementById('groupsGrid').classList.add('hidden');
+            document.getElementById('emptyState').classList.remove('hidden');
+        } else {
+            groups.forEach((g, num) => {
+                g.transcripts = [];
+                g.summary = null;
+                g.stats = {};
+                g.cumulativeTranscript = null;
+                g.uploadErrors = 0;
+                updateGroup(num, {});
+            });
+        }
         document.getElementById('timeElapsed').textContent = '0:00';
         if (elapsedInterval) {
             clearInterval(elapsedInterval);
@@ -563,11 +575,18 @@
     }
 
     // ----- Prompt Library -----
-    function loadPromptLibrary() {
+    async function loadPromptLibrary() {
+        try {
+            const res = await fetch('/api/prompt-library');
+            promptLibrary = res.ok ? await res.json() : [];
+        } catch (err) {
+            console.error('Failed to load prompt library:', err);
+            promptLibrary = [];
+        }
+
         const list = document.getElementById('promptList');
-        const library = JSON.parse(localStorage.getItem('promptLibrary') || '[]');
         list.innerHTML = '';
-        library.forEach((item, idx) => {
+        promptLibrary.forEach((item, idx) => {
             const li = document.createElement('li');
             li.className = 'border px-3 py-2 rounded flex justify-between items-center';
             li.innerHTML = `
@@ -581,43 +600,63 @@
         });
     }
 
-    function addPromptToLibrary() {
+    async function addPromptToLibrary() {
         const nameInput = document.getElementById('newPromptName');
         const text = document.getElementById('promptText').value.trim();
         const name = nameInput.value.trim();
         if (!name || !text) return;
-        const library = JSON.parse(localStorage.getItem('promptLibrary') || '[]');
-        const existing = library.findIndex(p => p.name === name);
-        if (existing >= 0) library[existing].text = text; else library.push({ name, text });
-        localStorage.setItem('promptLibrary', JSON.stringify(library));
-        nameInput.value = '';
-        loadPromptLibrary();
-        showPromptFeedback('Prompt saved to library', 'success');
+        try {
+            const res = await fetch('/api/prompt-library', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, text })
+            });
+            if (res.ok) {
+                nameInput.value = '';
+                showPromptFeedback('Prompt saved to library', 'success');
+                await loadPromptLibrary();
+            } else {
+                showPromptFeedback('Failed to save prompt', 'error');
+            }
+        } catch (err) {
+            console.error('Failed to save prompt:', err);
+            showPromptFeedback('Failed to save prompt', 'error');
+        }
     }
 
     function usePrompt(index) {
-        const library = JSON.parse(localStorage.getItem('promptLibrary') || '[]');
-        if (library[index]) {
-            document.getElementById('promptText').value = library[index].text;
+        if (promptLibrary[index]) {
+            document.getElementById('promptText').value = promptLibrary[index].text;
         }
     }
 
-    function editPrompt(index) {
-        const library = JSON.parse(localStorage.getItem('promptLibrary') || '[]');
-        if (!library[index]) return;
-        const newName = prompt('Edit prompt name', library[index].name);
+    async function editPrompt(index) {
+        const item = promptLibrary[index];
+        if (!item) return;
+        const newName = prompt('Edit prompt name', item.name);
         if (newName !== null) {
-            library[index].name = newName.trim();
-            localStorage.setItem('promptLibrary', JSON.stringify(library));
-            loadPromptLibrary();
+            try {
+                await fetch(`/api/prompt-library/${item._id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: newName })
+                });
+                await loadPromptLibrary();
+            } catch (err) {
+                console.error('Failed to update prompt:', err);
+            }
         }
     }
 
-    function deletePrompt(index) {
-        const library = JSON.parse(localStorage.getItem('promptLibrary') || '[]');
-        library.splice(index, 1);
-        localStorage.setItem('promptLibrary', JSON.stringify(library));
-        loadPromptLibrary();
+    async function deletePrompt(index) {
+        const item = promptLibrary[index];
+        if (!item) return;
+        try {
+            await fetch(`/api/prompt-library/${item._id}`, { method: 'DELETE' });
+            await loadPromptLibrary();
+        } catch (err) {
+            console.error('Failed to delete prompt:', err);
+        }
     }
 
     document.addEventListener('DOMContentLoaded', loadPromptLibrary);
@@ -1108,7 +1147,7 @@
                 document.getElementById('timeElapsed').textContent = `${m}:${s.toString().padStart(2,'0')}`;
             }, 1000);
 
-            resetUI();
+            resetUI(true);
 
             showTemporaryMessage('Recording started successfully!', 'success');
         } catch (err) {
