@@ -1,0 +1,1207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Teacher Dashboard - Checkbox Mode - Smart Classroom</title>
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    animation: {
+                        'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+                        'bounce-subtle': 'bounce 1s ease-in-out 2',
+                        'ping-slow': 'ping 2s cubic-bezier(0, 0, 0.2, 1) infinite',
+                        'fade-in': 'fadeIn 0.5s ease-out',
+                        'slide-up': 'slideUp 0.3s ease-out'
+                    },
+                    keyframes: {
+                        fadeIn: {
+                            '0%': { opacity: '0', transform: 'translateY(10px)' },
+                            '100%': { opacity: '1', transform: 'translateY(0)' }
+                        },
+                        slideUp: {
+                            '0%': { opacity: '0', transform: 'translateY(20px)' },
+                            '100%': { opacity: '1', transform: 'translateY(0)' }
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        .gradient-bg { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+        .glass { backdrop-filter: blur(10px); background: rgba(255, 255, 255, 0.1); }
+        
+        /* iPad and touch optimizations */
+        @media (max-width: 768px) {
+            .mode-btn {
+                min-height: 44px; /* Apple's recommended touch target size */
+            }
+        }
+        
+        /* Improve touch interactions */
+        button, a, input, select, textarea {
+            touch-action: manipulation;
+        }
+        
+        /* Better button sizing for touch */
+        .touch-friendly {
+            min-height: 44px;
+            min-width: 44px;
+        }
+        
+        /* Button responsiveness improvements */
+        button {
+            transition: all 0.15s ease;
+        }
+        
+        button:active:not(:disabled) {
+            transform: scale(0.98);
+        }
+        
+        button:disabled {
+            pointer-events: none;
+        }
+        
+        /* Loading spinner animation */
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        
+        .animate-spin {
+            animation: spin 1s linear infinite;
+        }
+        
+        /* Prevent zoom on input focus on iOS */
+        @media screen and (-webkit-min-device-pixel-ratio: 0) {
+            input[type="text"], input[type="number"], select, textarea {
+                font-size: 16px;
+            }
+        }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <!-- Header -->
+    <header class="gradient-bg text-white shadow-xl">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+            <div class="flex items-center justify-between mb-4">
+                <div class="flex items-center space-x-4">
+                    <div class="w-10 h-10 sm:w-12 sm:h-12 bg-white/20 rounded-xl flex items-center justify-center backdrop-blur-sm">
+                        <i data-lucide="check-square" class="w-6 h-6 sm:w-7 sm:h-7 text-white"></i>
+                    </div>
+                    <div>
+                        <h1 class="text-xl sm:text-2xl font-bold">Smart Classroom - Checkbox Mode</h1>
+                        <div class="flex flex-col sm:flex-row sm:items-center sm:space-x-4 space-y-1 sm:space-y-0 mt-1">
+                            <p class="text-white/90 text-sm">
+                                Session: <span id="sessionCode" class="font-mono font-semibold text-white">Loading...</span>
+                            </p>
+                            <div id="connectionStatus" class="flex items-center space-x-2 bg-white/10 px-3 py-1.5 rounded-full backdrop-blur-sm w-fit">
+                                <div id="connectionDot" class="w-2 h-2 bg-green-400 rounded-full animate-ping-slow"></div>
+                                <span id="connectionText" class="text-xs font-medium text-white">Connected</span>
+                            </div>
+                            <p class="text-white/90 text-sm">Elapsed: <span id="timeElapsed">0:00</span></p>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Recording Controls -->
+                <div class="flex items-center space-x-2 sm:space-x-3">
+                    <button id="startBtn" class="bg-green-500 hover:bg-green-600 text-white px-4 sm:px-6 py-2 sm:py-3 rounded-lg font-semibold transition-all duration-200 transform hover:scale-105 shadow-lg flex items-center text-sm sm:text-base">
+                        <i data-lucide="play" class="w-4 h-4 sm:w-5 sm:h-5 mr-2"></i>
+                        <span class="hidden sm:inline">Start Recording</span>
+                        <span class="sm:hidden">Start</span>
+                    </button>
+                    <button id="stopBtn" disabled class="bg-red-500 hover:bg-red-600 disabled:bg-gray-400 disabled:cursor-not-allowed text-white px-4 sm:px-6 py-2 sm:py-3 rounded-lg font-semibold transition-all duration-200 shadow-lg flex items-center text-sm sm:text-base">
+                        <i data-lucide="square" class="w-4 h-4 sm:w-5 sm:h-5 mr-2"></i>
+                        <span class="hidden sm:inline">Stop Recording</span>
+                        <span class="sm:hidden">Stop</span>
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Bottom Row: Controls and Navigation -->
+            <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between space-y-3 lg:space-y-0">
+                <!-- Left Side: Interval -->
+                <div class="flex items-center space-x-3 sm:space-x-4">
+                    <div class="flex items-center space-x-2 sm:space-x-3 bg-white/10 px-3 sm:px-4 py-2 rounded-lg backdrop-blur-sm">
+                        <label for="intervalInput" class="text-sm font-medium text-white/90">Interval:</label>
+                        <input 
+                            type="number" 
+                            id="intervalInput" 
+                            min="10" 
+                            max="120" 
+                            value="30" 
+                            class="w-12 sm:w-16 px-2 py-1 text-sm border border-white/20 rounded bg-white/10 text-white placeholder-white/60 focus:outline-none focus:ring-2 focus:ring-white/30"
+                        >
+                        <span class="text-sm text-white/80">sec</span>
+                    </div>
+                </div>
+                
+                <!-- Right Side: Mode Navigation -->
+                <div class="flex items-center space-x-3">
+                    <span class="text-sm text-white/80 hidden sm:inline">Modes:</span>
+                    <div class="flex bg-white/10 rounded-lg p-1 space-x-1 w-full sm:w-auto">
+                        <a href="/admin.html" class="mode-btn text-white/80 hover:bg-white/20 hover:text-white px-3 py-2 rounded text-sm font-medium transition-colors flex items-center justify-center flex-1 sm:flex-initial min-w-0">
+                            <i data-lucide="message-square" class="w-4 h-4 mr-1 sm:mr-2 flex-shrink-0"></i>
+                            <span class="truncate">Summary</span>
+                        </a>
+                        <button class="mode-btn bg-white/20 text-white px-3 py-2 rounded text-sm font-medium transition-colors flex items-center justify-center flex-1 sm:flex-initial min-w-0" data-mode="checkbox">
+                            <i data-lucide="check-square" class="w-4 h-4 mr-1 sm:mr-2 flex-shrink-0"></i>
+                            <span class="truncate">Checkbox</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <!-- Criteria Setup Section (Collapsible) -->
+        <div class="bg-white rounded-xl shadow-lg border border-gray-200 mb-8">
+            <button 
+                id="criteriaToggle" 
+                onclick="toggleCriteriaEditor()"
+                class="w-full px-6 py-4 text-left hover:bg-gray-50 transition-colors duration-200"
+            >
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center space-x-3">
+                        <div class="w-8 h-8 bg-green-100 rounded-lg flex items-center justify-center">
+                            <svg class="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                            </svg>
+                        </div>
+                        <div>
+                            <h3 class="text-lg font-semibold text-gray-900">Discussion Criteria Setup</h3>
+                            <p class="text-sm text-gray-600">Set up your discussion question and criteria checklist</p>
+                        </div>
+                    </div>
+                    <svg id="criteriaChevron" class="w-5 h-5 text-gray-400 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                    </svg>
+                </div>
+            </button>
+            
+            <div id="criteriaEditor" class="hidden border-t border-gray-200">
+                <div class="p-6">
+                    <div class="space-y-6">
+                        <!-- Scenario/Question Section -->
+                        <div>
+                            <label for="scenarioInput" class="block text-sm font-medium text-gray-700 mb-2">
+                                Discussion Question/Scenario
+                            </label>
+                            <textarea 
+                                id="scenarioInput" 
+                                rows="4" 
+                                class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent resize-vertical"
+                                placeholder="Enter the discussion question or scenario context..."
+                            ></textarea>
+                        </div>
+                        
+                        <!-- Criteria Input -->
+                        <div>
+                            <label for="criteriaInput" class="block text-sm font-medium text-gray-700 mb-2">
+                                Criteria Checklist (one per line)
+                            </label>
+                            <textarea 
+                                id="criteriaInput" 
+                                rows="8" 
+                                class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent resize-vertical font-mono text-sm"
+                                placeholder="Enter each criterion on a new line, for example:
+Students explain why back titration is used
+Students identify the reaction between CaCO₃ and HCl
+Students describe proper weighing techniques
+Students understand the role of NaOH in the process"
+                            ></textarea>
+                            <p class="text-xs text-gray-500 mt-1">Each line will become a separate criterion to check off</p>
+                        </div>
+                        
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center space-x-4">
+                                <button 
+                                    onclick="loadTestData()"
+                                    class="text-orange-600 hover:text-orange-800 text-sm font-medium transition-colors"
+                                >
+                                    📋 Load Chemistry Test Data
+                                </button>
+                                <button 
+                                    onclick="clearCriteria()"
+                                    class="text-gray-600 hover:text-gray-800 text-sm font-medium transition-colors"
+                                >
+                                    🗑️ Clear All
+                                </button>
+                            </div>
+                            <div class="flex space-x-3">
+                                <button id="testBtn" class="bg-purple-500 hover:bg-purple-600 text-white px-3 py-2 rounded-lg font-medium transition-colors flex items-center text-sm">
+                                    <i data-lucide="flask" class="w-4 h-4 mr-2"></i>
+                                    <span>🧪 Test Mode</span>
+                                </button>
+                                <button onclick="testTranscriptModal()" class="bg-blue-500 hover:bg-blue-600 text-white px-3 py-2 rounded-lg font-medium transition-colors flex items-center text-sm">
+                                    <i data-lucide="eye" class="w-4 h-4 mr-2"></i>
+                                    <span>📄 Test Modal</span>
+                                </button>
+                                <button onclick="testModalDirect()" class="bg-red-500 hover:bg-red-600 text-white px-3 py-2 rounded-lg font-medium transition-colors flex items-center text-sm">
+                                    <i data-lucide="zap" class="w-4 h-4 mr-2"></i>
+                                    <span>🔬 Direct Test</span>
+                                </button>
+                                <button
+                                    onclick="saveCriteria()"
+                                    class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg font-medium transition-colors"
+                                >
+                                    💾 Save & Apply
+                                </button>
+                            </div>
+                        </div>
+
+                        <div id="criteriaFeedback" class="hidden p-4 rounded-lg">
+                            <!-- Feedback messages will appear here -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Empty State -->
+        <div id="emptyState" class="text-center py-16">
+            <div class="w-24 h-24 mx-auto bg-gradient-to-br from-green-100 to-emerald-200 rounded-full flex items-center justify-center mb-6">
+                <svg class="w-12 h-12 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m13.5-9a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z"/>
+                </svg>
+            </div>
+            <h3 class="text-xl font-semibold text-gray-900 mb-2">Waiting for Students</h3>
+            <p class="text-gray-600 max-w-md mx-auto">Student groups will appear here when they join your session. Set up your criteria above and start recording to begin.</p>
+        </div>
+
+        <!-- Groups Grid -->
+        <div id="groupsGrid" class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6 hidden">
+            <!-- Group cards will be inserted here -->
+        </div>
+    </main>
+
+    <!-- Transcript Modal -->
+    <div id="transcriptModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 hidden z-50">
+        <div class="bg-white rounded-xl shadow-2xl max-w-4xl w-full max-h-[80vh] overflow-hidden">
+            <div class="flex items-center justify-between p-6 border-b border-gray-200">
+                <div>
+                    <h3 class="text-lg font-semibold text-gray-900">Full Transcript</h3>
+                    <p class="text-sm text-gray-600">Group <span id="modalGroupNumber">-</span> • <span id="modalTranscriptCount">0</span> segments</p>
+                </div>
+                <button onclick="closeTranscriptModal()" class="text-gray-400 hover:text-gray-600 transition-colors">
+                    <i data-lucide="x" class="w-6 h-6"></i>
+                </button>
+            </div>
+            <div class="p-6 overflow-y-auto max-h-[60vh]">
+                <div id="modalTranscriptContent" class="space-y-4">
+                    <!-- Transcript content will be inserted here -->
+                </div>
+            </div>
+            <div class="px-6 py-4 bg-gray-50 border-t border-gray-200">
+                <div class="flex items-center justify-between">
+                    <div class="text-sm text-gray-600">
+                        💡 Tip: This shows all transcript segments for this group during the current session
+                    </div>
+                    <button onclick="closeTranscriptModal()" class="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-lg font-medium transition-colors">
+                        Close
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const socket = io();
+        let sessionCode = null;  
+        let currentCriteria = [];
+        let currentScenario = "";
+        const groups = new Map();
+        let elapsedInterval = null;
+        let recordingStart = null;
+        let isRecording = false;
+
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            lucide.createIcons();
+            loadTestData(); // Load chemistry test data
+            createSession(); // Create session automatically like admin.html
+        });
+
+        // Create new session automatically
+        async function createSession() {
+            try {
+                const response = await fetch('/api/new-session');
+                const data = await response.json();
+                sessionCode = data.code;
+                document.getElementById('sessionCode').textContent = sessionCode;
+                socket.emit('admin_join', { code: sessionCode });
+                console.log('📋 Checkbox mode session created:', sessionCode);
+                
+                // Automatically set up hardcoded criteria
+                setupHardcodedCriteria();
+            } catch (err) {
+                console.error('Failed to create session:', err);
+                showError('Failed to create session. Please refresh the page.');
+            }
+        }
+
+        // Setup hardcoded criteria automatically  
+        function setupHardcodedCriteria() {
+            const scenario = document.getElementById('scenarioInput').value.trim();
+            const criteriaText = document.getElementById('criteriaInput').value.trim();
+            
+            if (criteriaText) {
+                // Parse criteria (one per line)
+                const criteriaLines = criteriaText.split('\n')
+                    .map(line => line.trim())
+                    .filter(line => line.length > 0);
+
+                currentCriteria = criteriaLines.map((line, index) => ({
+                    id: index,
+                    description: line
+                }));
+                currentScenario = scenario;
+                
+                console.log('📋 Hardcoded criteria ready:', currentCriteria.length, 'items');
+            }
+        }
+
+        // Load test data
+        function loadTestData() {
+            // Set scenario
+            document.getElementById('scenarioInput').value = `Chemistry Practical: Back Titration of Calcium Carbonate
+
+Students are performing a back titration experiment to determine the percentage purity of calcium carbonate (CaCO₃) in an impure sample. They need to demonstrate understanding of the key concepts and procedures.`;
+
+            // Set criteria
+            document.getElementById('criteriaInput').value = `Students explain that back titration is used because CaCO₃ is not soluble in water and cannot be titrated directly
+Students explain that direct titration is not suitable for insoluble solids like CaCO₃
+Students identify that CaCO₃ reacts with hydrochloric acid (HCl) to form salt, water, and carbon dioxide
+Students explain that CaCO₃ does not react with NaOH
+Students mention using a weighing bottle and analytical balance to measure CaCO₃ accurately
+Students describe weighing by difference technique (weigh full bottle, then bottle with remaining solid)
+Students explain adding excess HCl to ensure complete reaction with CaCO₃
+Students recognize effervescence due to CO₂ release during the reaction
+Students mention using a funnel to prevent acid spray from escaping
+Students explain that NaOH is used to determine how much unreacted HCl is left
+Students understand that the solution must be diluted before titration
+Students aim for a titre volume between 20.00–25.00 cm³ to minimize percentage error
+Students use the NaOH titre to back-calculate how much HCl reacted with CaCO₃
+Students choose appropriate indicator (methyl orange or thymolphthalein)
+Students identify correct colour changes for their chosen indicator
+Students recognize when to stop titration (consistent titres and permanent colour change)`;
+        }
+
+        // Toggle criteria editor
+        function toggleCriteriaEditor() {
+            const editor = document.getElementById('criteriaEditor');
+            const chevron = document.getElementById('criteriaChevron');
+            
+            if (editor.classList.contains('hidden')) {
+                editor.classList.remove('hidden');
+                chevron.classList.add('rotate-180');
+            } else {
+                editor.classList.add('hidden');
+                chevron.classList.remove('rotate-180');
+            }
+        }
+
+        // Clear criteria
+        function clearCriteria() {
+            document.getElementById('scenarioInput').value = '';
+            document.getElementById('criteriaInput').value = '';
+            currentCriteria = [];
+            currentScenario = "";
+            showFeedback('Criteria cleared', 'info');
+        }
+
+        // Save and apply criteria
+        async function saveCriteria() {
+            const scenario = document.getElementById('scenarioInput').value.trim();
+            const criteriaText = document.getElementById('criteriaInput').value.trim();
+            
+            if (!criteriaText) {
+                showFeedback('Please enter at least one criterion', 'error');
+                return;
+            }
+
+            // Parse criteria (one per line)
+            const criteriaLines = criteriaText.split('\n')
+                .map(line => line.trim())
+                .filter(line => line.length > 0);
+
+            currentCriteria = criteriaLines.map((line, index) => ({
+                id: index,
+                description: line
+            }));
+            currentScenario = scenario;
+
+            // Save to backend
+            try {
+                const response = await fetch('/api/checkbox/session', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        sessionCode: sessionCode,
+                        criteria: currentCriteria,
+                        scenario: scenario,
+                        interval: parseInt(document.getElementById('intervalInput').value) * 1000
+                    })
+                });
+
+                if (response.ok) {
+                    showFeedback(`Criteria saved successfully! ${currentCriteria.length} criteria ready.`, 'success');
+                    console.log('📋 Criteria saved:', currentCriteria.length, 'items');
+                } else {
+                    showFeedback('Failed to save criteria', 'error');
+                }
+            } catch (err) {
+                console.error('Error saving criteria:', err);
+                showFeedback('Error saving criteria', 'error');
+            }
+        }
+
+        // Show feedback message
+        function showFeedback(message, type) {
+            const feedback = document.getElementById('criteriaFeedback');
+            const colors = {
+                success: 'bg-green-50 border-green-200 text-green-800',
+                error: 'bg-red-50 border-red-200 text-red-800',
+                info: 'bg-blue-50 border-blue-200 text-blue-800'
+            };
+            
+            feedback.className = `p-4 rounded-lg border ${colors[type]}`;
+            feedback.textContent = message;
+            feedback.classList.remove('hidden');
+            
+            if (type !== 'error') {
+                setTimeout(() => {
+                    feedback.classList.add('hidden');
+                }, 3000);
+            }
+        }
+
+        // Show error message
+        function showError(message) {
+            showFeedback(message, 'error');
+        }
+
+        // Update group with checkbox data
+        function updateGroup(groupNumber, data) {
+            // Hide empty state and show grid
+            document.getElementById('emptyState').classList.add('hidden');
+            document.getElementById('groupsGrid').classList.remove('hidden');
+            
+            let groupEl = document.getElementById(`group-${groupNumber}`);
+            if (!groupEl) {
+                groupEl = document.createElement('div');
+                groupEl.id = `group-${groupNumber}`;
+                groupEl.className = 'animate-fade-in';
+                document.getElementById('groupsGrid').appendChild(groupEl);
+            }
+            
+            // Update group data
+            const groupData = groups.get(groupNumber) || {
+                transcripts: [],
+                checkboxes: currentCriteria.map(c => ({
+                    id: c.id,
+                    description: c.description,
+                    completed: false,
+                    quote: null
+                })),
+                stats: {}
+            };
+            
+            // Handle new transcript data
+            if (data.latestTranscript) {
+                console.log('📝 Adding transcript to group', groupNumber, ':', data.latestTranscript.substring(0, 50) + '...');
+                groupData.transcripts.push({
+                    text: data.latestTranscript,
+                    timestamp: Date.now()
+                });
+                if (groupData.transcripts.length > 5) {
+                    groupData.transcripts = groupData.transcripts.slice(-5); // Keep last 5
+                }
+                console.log('📚 Group', groupNumber, 'now has', groupData.transcripts.length, 'transcript segments');
+            } else {
+                console.log('⚠️ No latestTranscript in data for group', groupNumber);
+            }
+
+            // Handle checkbox updates from AI processing
+            if (data.checkboxUpdates) {
+                console.log('🔄 Processing', data.checkboxUpdates.length, 'checkbox updates');
+                console.log('🔄 Current checkboxes before update:', groupData.checkboxes.map(c => ({id: c.id, completed: c.completed})));
+                
+                data.checkboxUpdates.forEach(update => {
+                    console.log('🔄 Looking for checkbox with id:', update.criteriaId, 'in checkboxes:', groupData.checkboxes.map(c => c.id));
+                    const checkbox = groupData.checkboxes.find(c => c.id === update.criteriaId);
+                    if (checkbox) {
+                        console.log('✅ Found checkbox, updating:', checkbox.id, 'to completed:', update.completed);
+                        checkbox.completed = update.completed;
+                        checkbox.quote = update.quote;
+                    } else {
+                        console.warn('❌ Could not find checkbox with id:', update.criteriaId);
+                    }
+                });
+                
+                console.log('🔄 Current checkboxes after update:', groupData.checkboxes.map(c => ({id: c.id, completed: c.completed})));
+            }
+            
+            groups.set(groupNumber, groupData);
+            
+            // Update UI
+            const completedCount = groupData.checkboxes.filter(c => c.completed).length;
+            const totalCount = groupData.checkboxes.length;
+            const completionRate = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
+
+            groupEl.innerHTML = `
+                <div class="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden transition-all duration-300 hover:shadow-xl">
+                    <!-- Group Header -->
+                    <div class="bg-gradient-to-r from-green-500 to-emerald-600 text-white p-6">
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center space-x-3">
+                                <div class="w-10 h-10 bg-white/20 rounded-lg flex items-center justify-center">
+                                    <span class="text-lg font-bold">${groupNumber}</span>
+                                </div>
+                                <div>
+                                    <h3 class="text-lg font-semibold">Group ${groupNumber}</h3>
+                                    <p class="text-white/80 text-sm">${completedCount}/${totalCount} criteria completed</p>
+                                </div>
+                            </div>
+                            <div class="flex items-center space-x-2">
+                                ${data.isActive ? 
+                                    '<div class="w-3 h-3 bg-green-300 rounded-full animate-pulse"></div><span class="text-sm font-medium">Active</span>' :
+                                    '<div class="w-3 h-3 bg-gray-300 rounded-full"></div><span class="text-sm">Waiting</span>'
+                                }
+                            </div>
+                        </div>
+                        <!-- Progress Bar -->
+                        <div class="mt-4">
+                            <div class="flex justify-between items-center mb-2">
+                                <span class="text-sm text-white/90">Progress</span>
+                                <span class="text-sm font-semibold">${completionRate}%</span>
+                            </div>
+                            <div class="w-full bg-white/20 rounded-full h-2">
+                                <div class="bg-white h-2 rounded-full transition-all duration-500" style="width: ${completionRate}%"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Checkbox List -->
+                    <div class="p-6">
+                        <div class="space-y-3 max-h-96 overflow-y-auto">
+                            ${groupData.checkboxes.map(checkbox => `
+                                <div class="flex items-start space-x-3 p-3 rounded-lg border ${
+                                    checkbox.completed ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-200'
+                                }">
+                                    <div class="flex-shrink-0 mt-1">
+                                        <div class="w-5 h-5 rounded border-2 flex items-center justify-center ${
+                                            checkbox.completed ? 'bg-green-500 border-green-500' : 'border-gray-300'
+                                        }">
+                                            ${checkbox.completed ? '<i data-lucide="check" class="w-3 h-3 text-white"></i>' : ''}
+                                        </div>
+                                    </div>
+                                    <div class="flex-1 min-w-0">
+                                        <p class="text-sm font-medium text-gray-900 mb-1">${checkbox.description}</p>
+                                        ${checkbox.completed && checkbox.quote ? `
+                                            <div class="text-xs text-green-700 bg-green-100 rounded px-2 py-1 mt-2">
+                                                <span class="font-medium">Quote:</span> 
+                                                "${checkbox.quote}"
+                                            </div>
+                                        ` : ''}
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                        
+                        ${groupData.transcripts.length > 0 ? `
+                            <div class="mt-6 pt-4 border-t border-gray-100">
+                                <div class="flex items-center justify-between mb-2">
+                                    <h4 class="text-sm font-medium text-gray-700">Recent Discussion</h4>
+                                    <button onclick="console.log('🔍 View Full Transcript clicked for group ${groupNumber}'); expandTranscript(${groupNumber})" class="text-xs text-blue-600 hover:text-blue-800 font-medium transition-colors">
+                                        📄 View Full Transcript
+                                    </button>
+                                </div>
+                                <div class="text-sm text-gray-600 bg-gray-50 rounded p-3">
+                                    "${groupData.transcripts[groupData.transcripts.length - 1].text.substring(0, 150)}..."
+                                </div>
+                            </div>
+                        ` : ''}
+                    </div>
+                </div>
+            `;
+
+            // Re-initialize Lucide icons
+            lucide.createIcons();
+        }
+
+        // Socket event handlers (similar to admin.html)
+        socket.on('student_joined', ({ group, socketId }) => {
+            console.log(`✅ Student joined group ${group}`);
+            updateGroup(group, { isActive: true });
+        });
+
+        socket.on('admin_update', (data) => {
+            console.log('📋 Received checkbox update:', data);
+            console.log('📋 Update for group:', data.group);
+            console.log('📋 Checkbox updates received:', data.checkboxUpdates);
+            
+            updateGroup(data.group, {
+                latestTranscript: data.latestTranscript,
+                checkboxUpdates: data.checkboxUpdates,
+                isActive: true
+            });
+        });
+
+        socket.on('connect', () => {
+            console.log('🔌 Checkbox admin connected');
+            if (sessionCode) {
+                socket.emit('admin_join', { code: sessionCode });
+            }
+        });
+
+        // Recording controls (improved responsiveness)
+        document.getElementById('startBtn').addEventListener('click', async () => {
+            const startBtn = document.getElementById('startBtn');
+            const stopBtn = document.getElementById('stopBtn');
+            const intervalInput = document.getElementById('intervalInput');
+            
+            // Prevent multiple clicks
+            if (startBtn.disabled || isRecording) {
+                console.log('🚫 Start button already processing or recording active');
+                return;
+            }
+            
+            // Immediate UI feedback - disable button and show loading
+            startBtn.disabled = true;
+            startBtn.innerHTML = `
+                <svg class="animate-spin w-4 h-4 sm:w-5 sm:h-5 mr-2" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="m4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <span class="hidden sm:inline">Starting...</span>
+                <span class="sm:hidden">...</span>
+            `;
+            startBtn.classList.add('opacity-75', 'cursor-not-allowed');
+            
+            try {
+                console.log('🎬 Start Recording button clicked');
+                
+                // Step 1: Ensure criteria are loaded
+                showFeedback('📋 Loading criteria...', 'info');
+                if (currentCriteria.length === 0) {
+                    console.log('📋 No criteria found, loading test data...');
+                    loadTestData();
+                    setupHardcodedCriteria();
+                }
+
+                if (currentCriteria.length === 0) {
+                    throw new Error('No criteria available. Please set up criteria first or refresh the page.');
+                }
+
+                console.log('📋 Using criteria:', currentCriteria.length, 'items');
+
+                // Step 2: Save criteria to backend
+                showFeedback('💾 Saving criteria to backend...', 'info');
+                console.log('💾 Saving criteria to backend...');
+                const criteriaResponse = await fetch('/api/checkbox/session', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        sessionCode: sessionCode,
+                        criteria: currentCriteria,
+                        scenario: currentScenario || "Chemistry discussion session",
+                        interval: parseInt(intervalInput.value) * 1000
+                    })
+                });
+
+                if (!criteriaResponse.ok) {
+                    const errorData = await criteriaResponse.json();
+                    console.warn('⚠️ Criteria save response:', errorData);
+                    // Continue anyway - might be duplicate key error which is OK
+                }
+
+                // Step 3: Start the recording session
+                showFeedback('▶️ Starting recording session...', 'info');
+                console.log('▶️ Starting recording session...');
+                const intervalSeconds = parseInt(intervalInput.value) || 30;
+                const intervalMs = intervalSeconds * 1000;
+                
+                const response = await fetch(`/api/session/${sessionCode}/start`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ interval: intervalMs })
+                });
+                
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error('❌ Start session failed:', response.status, errorText);
+                    throw new Error(`Failed to start recording: HTTP ${response.status}`);
+                }
+                
+                console.log('✅ Recording session started successfully');
+                
+                // Update UI for recording state
+                startBtn.innerHTML = `
+                    <i data-lucide="play" class="w-4 h-4 sm:w-5 sm:h-5 mr-2"></i>
+                    <span class="hidden sm:inline">Start Recording</span>
+                    <span class="sm:hidden">Start</span>
+                `;
+                startBtn.classList.add('opacity-50', 'cursor-not-allowed');
+                stopBtn.disabled = false;
+                stopBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+                intervalInput.disabled = true;
+
+                // Start elapsed timer
+                recordingStart = Date.now();
+                if (elapsedInterval) {
+                    clearInterval(elapsedInterval);
+                }
+                elapsedInterval = setInterval(() => {
+                    const elapsed = Math.floor((Date.now() - recordingStart) / 1000);
+                    const m = Math.floor(elapsed / 60);
+                    const s = elapsed % 60;
+                    document.getElementById('timeElapsed').textContent = `${m}:${s.toString().padStart(2,'0')}`;
+                }, 1000);
+
+                isRecording = true;
+                showFeedback(`✅ Recording started! Session: ${sessionCode} | ${currentCriteria.length} criteria active | Students can now join and discuss.`, 'success');
+                
+                // Re-create icons after updating button HTML
+                lucide.createIcons();
+                
+            } catch (err) {
+                console.error('❌ Failed to start session:', err);
+                showError(`Failed to start recording: ${err.message}`);
+                
+                // Reset UI on error
+                startBtn.disabled = false;
+                startBtn.innerHTML = `
+                    <i data-lucide="play" class="w-4 h-4 sm:w-5 sm:h-5 mr-2"></i>
+                    <span class="hidden sm:inline">Start Recording</span>
+                    <span class="sm:hidden">Start</span>
+                `;
+                startBtn.classList.remove('opacity-50', 'opacity-75', 'cursor-not-allowed');
+                stopBtn.disabled = true;
+                stopBtn.classList.add('opacity-50', 'cursor-not-allowed');
+                intervalInput.disabled = false;
+                isRecording = false;
+                
+                // Re-create icons after resetting button HTML
+                lucide.createIcons();
+            }
+        });
+        
+        document.getElementById('stopBtn').addEventListener('click', async () => {
+            const startBtn = document.getElementById('startBtn');
+            const stopBtn = document.getElementById('stopBtn');
+            const intervalInput = document.getElementById('intervalInput');
+            
+            // Prevent multiple clicks
+            if (stopBtn.disabled || !isRecording) {
+                console.log('🚫 Stop button already processing or not recording');
+                return;
+            }
+            
+            // Immediate UI feedback
+            stopBtn.disabled = true;
+            stopBtn.innerHTML = `
+                <svg class="animate-spin w-4 h-4 sm:w-5 sm:h-5 mr-2" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="m4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <span class="hidden sm:inline">Stopping...</span>
+                <span class="sm:hidden">...</span>
+            `;
+            stopBtn.classList.add('opacity-75');
+            
+            try {
+                showFeedback('⏹️ Stopping recording...', 'info');
+                
+                const response = await fetch(`/api/session/${sessionCode}/stop`, { method: 'POST' });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                // Update UI for stopped state
+                startBtn.disabled = false;
+                startBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+                
+                stopBtn.innerHTML = `
+                    <i data-lucide="square" class="w-4 h-4 sm:w-5 sm:h-5 mr-2"></i>
+                    <span class="hidden sm:inline">Stop Recording</span>
+                    <span class="sm:hidden">Stop</span>
+                `;
+                stopBtn.classList.add('opacity-50', 'cursor-not-allowed');
+                stopBtn.classList.remove('opacity-75');
+                
+                intervalInput.disabled = false;
+
+                // Stop elapsed timer
+                if (elapsedInterval) {
+                    clearInterval(elapsedInterval);
+                    elapsedInterval = null;
+                }
+                document.getElementById('timeElapsed').textContent = '0:00';
+                isRecording = false;
+                
+                showFeedback('⏹️ Recording stopped successfully!', 'success');
+                
+                // Re-create icons after updating button HTML
+                lucide.createIcons();
+                
+            } catch (err) {
+                console.error('❌ Failed to stop session:', err);
+                showError(`Failed to stop recording: ${err.message}`);
+                
+                // Reset stop button on error (keep recording state)
+                stopBtn.disabled = false;
+                stopBtn.innerHTML = `
+                    <i data-lucide="square" class="w-4 h-4 sm:w-5 sm:h-5 mr-2"></i>
+                    <span class="hidden sm:inline">Stop Recording</span>
+                    <span class="sm:hidden">Stop</span>
+                `;
+                stopBtn.classList.remove('opacity-50', 'opacity-75', 'cursor-not-allowed');
+                
+                // Re-create icons after resetting button HTML
+                lucide.createIcons();
+            }
+        });
+
+        // Direct modal test function - bypasses all data checks
+        window.testModalDirect = function() {
+            console.log('🔬 Direct modal test - bypassing all data checks');
+            
+            const modalEl = document.getElementById('transcriptModal');
+            const groupNumEl = document.getElementById('modalGroupNumber');
+            const countEl = document.getElementById('modalTranscriptCount');
+            const contentEl = document.getElementById('modalTranscriptContent');
+            
+            if (!modalEl) {
+                console.error('❌ transcriptModal element not found');
+                alert('ERROR: transcriptModal element not found');
+                return;
+            }
+            
+            if (!groupNumEl) {
+                console.error('❌ modalGroupNumber element not found');
+                alert('ERROR: modalGroupNumber element not found');
+                return;
+            }
+            
+            if (!countEl) {
+                console.error('❌ modalTranscriptCount element not found');
+                alert('ERROR: modalTranscriptCount element not found');
+                return;
+            }
+            
+            if (!contentEl) {
+                console.error('❌ modalTranscriptContent element not found');
+                alert('ERROR: modalTranscriptContent element not found');
+                return;
+            }
+            
+            // Set test content directly
+            groupNumEl.textContent = '1';
+            countEl.textContent = '3';
+            contentEl.innerHTML = `
+                <div class="border border-gray-200 rounded-lg p-4">
+                    <div class="flex items-center justify-between mb-2">
+                        <span class="text-sm font-medium text-gray-700">Segment 1</span>
+                        <span class="text-xs text-gray-500">10:30:15</span>
+                    </div>
+                    <div class="text-sm text-gray-900 leading-relaxed">
+                        Test transcript segment 1 - This is a test to see if the modal opens correctly.
+                    </div>
+                </div>
+                <div class="border border-gray-200 rounded-lg p-4">
+                    <div class="flex items-center justify-between mb-2">
+                        <span class="text-sm font-medium text-gray-700">Segment 2</span>
+                        <span class="text-xs text-gray-500">10:31:20</span>
+                    </div>
+                    <div class="text-sm text-gray-900 leading-relaxed">
+                        Test transcript segment 2 - This should appear in the modal if it's working.
+                    </div>
+                </div>
+                <div class="border border-gray-200 rounded-lg p-4">
+                    <div class="flex items-center justify-between mb-2">
+                        <span class="text-sm font-medium text-gray-700">Segment 3</span>
+                        <span class="text-xs text-gray-500">10:32:25</span>
+                    </div>
+                    <div class="text-sm text-gray-900 leading-relaxed">
+                        Test transcript segment 3 - If you can see this, the modal is working!
+                    </div>
+                </div>
+            `;
+            
+            console.log('✅ All modal elements found, attempting to show modal');
+            modalEl.classList.remove('hidden');
+            console.log('✅ Modal should now be visible');
+            
+            // Test if modal is actually visible
+            const isVisible = !modalEl.classList.contains('hidden');
+            console.log('🔍 Modal visibility check:', isVisible);
+            
+            if (isVisible) {
+                alert('SUCCESS: Modal opened successfully! You should see the transcript modal.');
+            } else {
+                alert('ERROR: Modal should be visible but might not be showing up.');
+            }
+        };
+
+        // Test function to verify transcript modal functionality
+        window.testTranscriptModal = function() {
+            console.log('🧪 Testing transcript modal functionality...');
+            
+            // Create mock transcript data for Group 1
+            const testTranscripts = [
+                {
+                    text: "Students explain that back titration is used because CaCO₃ is not soluble in water and cannot be titrated directly.",
+                    timestamp: Date.now() - 300000 // 5 minutes ago
+                },
+                {
+                    text: "Right, CaCO₃ reacts with HCl to form salt, water, and carbon dioxide. You can see the effervescence from the CO₂ being released.",
+                    timestamp: Date.now() - 240000 // 4 minutes ago
+                },
+                {
+                    text: "We should use a weighing bottle and analytical balance for accuracy. Yes, and we use the weighing by difference technique.",
+                    timestamp: Date.now() - 180000 // 3 minutes ago
+                },
+                {
+                    text: "For the titration part, we want our titre volume to be between 20 and 25 cm³ to minimize percentage error.",
+                    timestamp: Date.now() - 120000 // 2 minutes ago
+                },
+                {
+                    text: "We'll use methyl orange as our indicator. Methyl orange changes from red to orange at the endpoint.",
+                    timestamp: Date.now() - 60000 // 1 minute ago
+                }
+            ];
+            
+            // Ensure Group 1 exists
+            if (!groups.has(1)) {
+                updateGroup(1, { isActive: true });
+            }
+            
+            // Add test transcripts to Group 1
+            const groupData = groups.get(1);
+            groupData.transcripts = testTranscripts;
+            groups.set(1, groupData);
+            
+            // Update the UI to show the group
+            updateGroup(1, { 
+                isActive: true,
+                latestTranscript: testTranscripts[testTranscripts.length - 1].text
+            });
+            
+            console.log('✅ Added', testTranscripts.length, 'test transcripts to Group 1');
+            showFeedback(`✅ Test data added! Group 1 now has ${testTranscripts.length} transcript segments. Try the "View Full Transcript" button.`, 'success');
+        };
+
+        // Test button functionality
+        document.getElementById('testBtn').addEventListener('click', async () => {
+            try {
+                const testTranscript = `So for this back titration, we need to understand why we can't just titrate calcium carbonate directly, right? Yeah, that's because CaCO₃ is not soluble in water. You can't titrate something that doesn't dissolve properly. Exactly! Direct titration is not suitable for insoluble solids like calcium carbonate. That's why we need to use back titration. So we add hydrochloric acid to react with the CaCO₃ first? Right, CaCO₃ reacts with HCl to form salt, water, and carbon dioxide. You can see the effervescence from the CO₂ being released. And we need to add excess HCl to make sure all the calcium carbonate reacts completely. Then we use NaOH to determine how much unreacted HCl is left. I remember we need to be careful with the weighing. We should use a weighing bottle and analytical balance for accuracy. Yes, and we use the weighing by difference technique—weigh the full bottle first, then weigh it again after transferring some powder. Some residue always remains. For the titration part, we want our titre volume to be between 20 and 25 cm³ to minimize percentage error. And we'll use methyl orange as our indicator. Methyl orange changes from red to orange at the endpoint, right? We stop when we get consistent titres with a permanent colour change. Don't forget we need to dilute the solution before titration because the HCl is more concentrated than the NaOH we're using.`;
+                
+                console.log('🧪 Starting test mode...');
+                
+                // First ensure we have criteria saved
+                if (currentCriteria.length === 0) {
+                    setupHardcodedCriteria();
+                }
+                
+                if (currentCriteria.length === 0) {
+                    showError('No criteria available. Please refresh the page.');
+                    return;
+                }
+                
+                // Save criteria to backend if not already done
+                console.log('🧪 Saving criteria for test...');
+                const criteriaResponse = await fetch('/api/checkbox/session', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        sessionCode: sessionCode,
+                        scenario: currentScenario,
+                        criteria: currentCriteria,
+                        interval: 30000
+                    })
+                });
+                
+                if (!criteriaResponse.ok) {
+                    const errorData = await criteriaResponse.json();
+                    console.warn('🧪 Criteria save warning (may be duplicate):', errorData.error);
+                    // Continue anyway - might be duplicate key error which is OK
+                }
+                
+                // Create a test group if it doesn't exist
+                if (!groups.has(1)) {
+                    updateGroup(1, { isActive: true });
+                }
+                
+                // Process the test transcript using dedicated test endpoint
+                console.log('🧪 Processing test transcript...');
+                const processResponse = await fetch('/api/checkbox/test', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        sessionCode: sessionCode,
+                        transcript: testTranscript
+                    })
+                });
+                
+                if (!processResponse.ok) {
+                    const errorText = await processResponse.text();
+                    throw new Error(`HTTP ${processResponse.status}: ${errorText}`);
+                }
+                
+                const result = await processResponse.json();
+                console.log('🧪 Test result:', result);
+                
+                // Ensure result.matches is always an array
+                const matches = Array.isArray(result.matches) ? result.matches : [];
+                console.log('🧪 Matches found:', matches.length);
+                
+                // Update the group with the test results
+                const checkboxUpdates = matches.map(match => ({
+                    criteriaId: match.criteria_index,
+                    completed: true,
+                    quote: match.quote
+                }));
+                
+                updateGroup(1, {
+                    latestTranscript: testTranscript,
+                    checkboxUpdates: checkboxUpdates,
+                    isActive: true
+                });
+                
+                showFeedback(`🧪 Test completed! ${matches.length} criteria matched from ${currentCriteria.length} total.`, 'success');
+                
+            } catch (err) {
+                console.error('🧪 Test failed:', err);
+                showError(`Test failed: ${err.message}`);
+            }
+        });
+
+        // Expand transcript functionality (make it global)
+        window.expandTranscript = function(groupNumber) {
+            try {
+                console.log('🔍 expandTranscript called with groupNumber:', groupNumber);
+                console.log('🔍 Type of groupNumber:', typeof groupNumber);
+                console.log('🗂️ Available groups in map:', Array.from(groups.keys()));
+                console.log('🗂️ Groups map size:', groups.size);
+                
+                // Ensure groupNumber is a number
+                const groupNum = parseInt(groupNumber);
+                console.log('🔢 Parsed groupNumber:', groupNum);
+                
+                const groupData = groups.get(groupNum);
+                console.log('📋 Group data for', groupNum, ':', groupData);
+                
+                if (!groupData) {
+                    console.warn('⚠️ No group data available for group', groupNum);
+                    alert(`No group data available for group ${groupNum}. Available groups: ${Array.from(groups.keys()).join(', ')}`);
+                    return;
+                }
+                
+                if (!groupData.transcripts) {
+                    console.warn('⚠️ No transcripts property in group data for group', groupNum);
+                    groupData.transcripts = []; // Initialize if missing
+                }
+                
+                if (groupData.transcripts.length === 0) {
+                    console.warn('⚠️ No transcript data available for group', groupNum, '. Transcripts array is empty.');
+                    alert(`No transcript data available for group ${groupNum} yet. Transcripts array exists but is empty. Try the "📄 Test Modal" button first to add some test data.`);
+                    return;
+                }
+                
+                console.log('📄 Found', groupData.transcripts.length, 'transcript segments');
+                
+                // Check if modal elements exist
+                const modalEl = document.getElementById('transcriptModal');
+                const groupNumEl = document.getElementById('modalGroupNumber');
+                const countEl = document.getElementById('modalTranscriptCount');
+                const contentEl = document.getElementById('modalTranscriptContent');
+                
+                if (!modalEl || !groupNumEl || !countEl || !contentEl) {
+                    const missingElements = [];
+                    if (!modalEl) missingElements.push('transcriptModal');
+                    if (!groupNumEl) missingElements.push('modalGroupNumber');
+                    if (!countEl) missingElements.push('modalTranscriptCount');
+                    if (!contentEl) missingElements.push('modalTranscriptContent');
+                    
+                    console.error('❌ Modal elements not found:', missingElements);
+                    alert(`Modal elements missing: ${missingElements.join(', ')}. Please refresh the page.`);
+                    return;
+                }
+                
+                // Set modal content
+                groupNumEl.textContent = groupNum;
+                countEl.textContent = groupData.transcripts.length;
+                
+                const transcriptHtml = groupData.transcripts.map((transcript, index) => {
+                    const timestamp = new Date(transcript.timestamp).toLocaleTimeString();
+                    return `
+                        <div class="border border-gray-200 rounded-lg p-4">
+                            <div class="flex items-center justify-between mb-2">
+                                <span class="text-sm font-medium text-gray-700">Segment ${index + 1}</span>
+                                <span class="text-xs text-gray-500">${timestamp}</span>
+                            </div>
+                            <div class="text-sm text-gray-900 leading-relaxed">
+                                ${transcript.text}
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+                
+                contentEl.innerHTML = transcriptHtml;
+                
+                // Show modal
+                modalEl.classList.remove('hidden');
+                console.log('✅ Modal opened successfully');
+                
+                // Re-initialize icons
+                if (typeof lucide !== 'undefined' && lucide.createIcons) {
+                    lucide.createIcons();
+                }
+                
+                // Final check
+                const isVisible = !modalEl.classList.contains('hidden');
+                console.log('🔍 Modal visibility confirmed:', isVisible);
+                
+                if (!isVisible) {
+                    alert('Warning: Modal classList was updated but modal might not be visible due to CSS issues.');
+                }
+                
+            } catch (error) {
+                console.error('❌ Error in expandTranscript:', error);
+                alert(`Error opening transcript modal: ${error.message}`);
+            }
+        };
+
+        window.closeTranscriptModal = function() {
+            console.log('❌ Closing transcript modal');
+            document.getElementById('transcriptModal').classList.add('hidden');
+        };
+
+        // Close modal when clicking outside
+        document.getElementById('transcriptModal').addEventListener('click', (e) => {
+            if (e.target.id === 'transcriptModal') {
+                closeTranscriptModal();
+            }
+        });
+
+        // ESC key to close modal
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && !document.getElementById('transcriptModal').classList.contains('hidden')) {
+                closeTranscriptModal();
+            }
+        });
+    </script>
+</body>
+</html> 

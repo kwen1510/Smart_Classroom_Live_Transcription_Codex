@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Classroom - Mindmap Mode</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        .gradient-bg { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+        .mindmap-node { cursor: pointer; }
+        .mindmap-node:hover { stroke-width: 3px; }
+        .mindmap-link { fill: none; stroke: #999; stroke-width: 2px; }
+        .logs-panel { max-height: 400px; overflow-y: auto; }
+    </style>
+</head>
+<body class="bg-gray-50 font-sans">
+    <!-- Header -->  
+    <header class="gradient-bg text-white shadow-xl">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between space-y-3 sm:space-y-0">
+                <div class="flex items-center space-x-4">
+                    <div class="w-10 h-10 bg-white/20 rounded-lg flex items-center justify-center backdrop-blur-sm">
+                        <i data-lucide="brain-circuit" class="w-6 h-6 text-white"></i>
+                    </div>
+                    <div>
+                        <h1 class="text-lg sm:text-xl font-semibold">Smart Classroom - Mindmap Mode</h1>
+                        <p class="text-white/80 text-sm">Session: <span id="sessionCode" class="font-mono">-</span></p>
+                    </div>
+                </div>
+                <div class="flex items-center space-x-2 sm:space-x-4">
+                    <button id="toggleLogs" class="bg-white/20 backdrop-blur-sm px-3 sm:px-4 py-2 rounded-lg text-sm font-medium hover:bg-white/30 transition-colors">
+                        <span class="hidden sm:inline">Show Logs</span>
+                        <span class="sm:hidden">Logs</span>
+                    </button>
+                    <a href="admin.html" class="bg-white/20 backdrop-blur-sm px-3 sm:px-4 py-2 rounded-lg text-sm font-medium hover:bg-white/30 transition-colors">
+                        <span class="hidden sm:inline">Back to Admin</span>
+                        <span class="sm:hidden">Admin</span>
+                    </a>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="max-w-7xl mx-auto p-4 sm:p-6">
+        <!-- Setup Panel -->
+        <div id="setupPanel" class="bg-white rounded-xl shadow-lg border border-gray-200 p-4 sm:p-6 mb-6">
+            <h2 class="text-lg sm:text-xl font-semibold text-gray-900 mb-4 flex items-center">
+                <i data-lucide="settings" class="w-5 h-5 mr-2"></i>
+                Setup Mindmap Session
+            </h2>
+            
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Session Code</label>
+                    <div class="flex items-center space-x-2">
+                        <input id="sessionCodeInput" type="text" readonly
+                               class="flex-1 px-3 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-600 text-base font-mono"
+                               placeholder="Auto-generated">
+                        <button id="generateCodeBtn" class="bg-blue-100 hover:bg-blue-200 text-blue-700 px-3 py-2 rounded-lg transition-colors flex items-center">
+                            <i data-lucide="refresh-cw" class="w-4 h-4"></i>
+                        </button>
+                    </div>
+                    <p class="text-xs text-gray-500 mt-1">Automatically generated - click refresh to generate new</p>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Main Topic *</label>
+                    <input id="mainTopicInput" type="text" 
+                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-base"
+                           placeholder="Enter main discussion topic" required>
+                </div>
+                <div class="sm:col-span-2 lg:col-span-1">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Recording Interval</label>
+                    <select id="intervalSelect" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-base">
+                        <option value="30">30 seconds</option>
+                        <option value="60">60 seconds</option>
+                        <option value="120">2 minutes</option>
+                    </select>
+                </div>
+            </div>
+            
+            <div class="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-4">
+                <button id="createSessionBtn" class="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center text-base font-medium">
+                    <i data-lucide="play-circle" class="w-4 h-4 mr-2"></i>
+                    Create & Start Session
+                </button>
+                <button id="loadSessionBtn" class="bg-gray-600 text-white px-6 py-3 rounded-lg hover:bg-gray-700 transition-colors flex items-center justify-center text-base font-medium">
+                    <i data-lucide="folder-open" class="w-4 h-4 mr-2"></i>
+                    Load Existing Session
+                </button>
+            </div>
+            
+            <div class="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                <div class="flex items-start space-x-2">
+                    <i data-lucide="info" class="w-4 h-4 text-blue-600 mt-0.5 flex-shrink-0"></i>
+                    <div class="text-sm text-blue-800">
+                        <p class="font-medium mb-1">How it works:</p>
+                        <ul class="text-xs space-y-1">
+                            <li>• Enter your main discussion topic</li>
+                            <li>• Session code is automatically generated</li>
+                            <li>• AI will build a mind map as you discuss</li>
+                            <li>• Irrelevant chatter is filtered out automatically</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Session Info Panel -->
+        <div id="sessionInfo" class="hidden bg-green-50 border border-green-200 rounded-xl p-4 mb-6">
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between space-y-2 sm:space-y-0">
+                <div class="flex items-center">
+                    <i data-lucide="check-circle" class="w-5 h-5 text-green-600 mr-2"></i>
+                    <span class="text-green-800 font-medium">Session Active: </span>
+                    <span id="activeSessionCode" class="font-mono text-green-900 ml-1"></span>
+                </div>
+                <div class="text-green-700 text-sm">
+                    <span class="font-medium">Topic: </span>
+                    <span id="activeMainTopic" class="font-medium text-green-900 ml-1"></span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Content Area -->
+        <div class="grid grid-cols-1 lg:grid-cols-4 gap-4 sm:gap-6">
+            <!-- Mindmap Visualization -->
+            <div class="lg:col-span-3 bg-white rounded-xl shadow-lg border border-gray-200 order-1">
+                <div class="p-4 sm:p-6 border-b border-gray-100">
+                    <h3 class="text-lg font-semibold text-gray-900 flex items-center justify-between">
+                        <div class="flex items-center">
+                            <i data-lucide="network" class="w-5 h-5 mr-2"></i>
+                            Mind Map
+                        </div>
+                        <span id="nodeCount" class="text-sm text-gray-500">0 nodes</span>
+                    </h3>
+                </div>
+                <div id="mindmapContainer" class="p-2 sm:p-4" style="height: 500px;">
+                    <div id="emptyState" class="h-full flex items-center justify-center text-gray-500">
+                        <div class="text-center">
+                            <i data-lucide="brain-circuit" class="w-16 h-16 mx-auto mb-4 opacity-50"></i>
+                            <p class="text-lg font-medium">No session active</p>
+                            <p class="text-sm px-4">Create a session to start building your mindmap</p>
+                        </div>
+                    </div>
+                    <svg id="mindmapSvg" class="hidden w-full h-full touch-manipulation"></svg>
+                </div>
+            </div>
+
+            <!-- Logs Panel -->
+            <div id="logsPanel" class="bg-white rounded-xl shadow-lg border border-gray-200 lg:order-2 order-2">
+                <div class="p-4 border-b border-gray-100">
+                    <h3 class="text-lg font-semibold text-gray-900 flex items-center justify-between">
+                        <div class="flex items-center">
+                            <i data-lucide="scroll-text" class="w-5 h-5 mr-2"></i>
+                            Processing Logs
+                        </div>
+                        <button id="clearLogsBtn" class="text-sm text-red-600 hover:text-red-800 px-2 py-1 rounded hover:bg-red-50">Clear</button>
+                    </h3>
+                </div>
+                <div id="logsContainer" class="logs-panel p-4 space-y-2" style="max-height: 400px; overflow-y: auto;">
+                    <div class="text-gray-500 text-sm text-center py-8">
+                        No logs yet
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Recording Controls -->
+        <div id="recordingControls" class="hidden fixed bottom-6 right-4 sm:right-6 bg-white rounded-xl shadow-lg border border-gray-200 p-4">
+            <div class="flex items-center space-x-4">
+                <div id="recordingStatus" class="flex items-center space-x-2">
+                    <div class="w-3 h-3 bg-red-500 rounded-full animate-pulse"></div>
+                    <span class="text-sm font-medium text-gray-700">Recording...</span>
+                </div>
+                <button id="stopRecordingBtn" class="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition-colors flex items-center touch-manipulation">
+                    <i data-lucide="square" class="w-4 h-4 mr-2"></i>
+                    Stop
+                </button>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        let currentSession = null;
+        let mediaRecorder = null;
+        let recordingInterval = null;
+        let isRecording = false;
+        let mindmapData = { nodes: [], links: [] };
+        let svg, simulation, node, link, text;
+
+        // Initialize Lucide icons
+        document.addEventListener('DOMContentLoaded', () => {
+            lucide.createIcons();
+            initializeMindmapVisualization();
+            generateSessionCode(); // Auto-generate session code on load
+        });
+
+        // Auto-generate session code
+        function generateSessionCode() {
+            const code = Math.floor(100000 + Math.random() * 900000).toString();
+            document.getElementById('sessionCodeInput').value = code;
+            return code;
+        }
+
+        // Initialize D3.js mindmap visualization
+        function initializeMindmapVisualization() {
+            const container = document.getElementById('mindmapContainer');
+            const width = container.clientWidth;
+            const height = container.clientHeight;
+
+            svg = d3.select('#mindmapSvg')
+                .attr('width', width)
+                .attr('height', height);
+
+            // Create simulation
+            simulation = d3.forceSimulation()
+                .force('link', d3.forceLink().id(d => d.id).distance(100))
+                .force('charge', d3.forceManyBody().strength(-300))
+                .force('center', d3.forceCenter(width / 2, height / 2))
+                .force('collision', d3.forceCollide().radius(50));
+
+            // Create groups for links and nodes
+            const linkGroup = svg.append('g').attr('class', 'links');
+            const nodeGroup = svg.append('g').attr('class', 'nodes');
+
+            updateVisualization();
+        }
+
+        function updateVisualization() {
+            if (!svg || mindmapData.nodes.length === 0) return;
+
+            // Update links
+            link = svg.select('.links')
+                .selectAll('line')
+                .data(mindmapData.links)
+                .join('line')
+                .attr('class', 'mindmap-link')
+                .attr('stroke-width', 2);
+
+            // Update nodes
+            node = svg.select('.nodes')
+                .selectAll('g')
+                .data(mindmapData.nodes)
+                .join('g')
+                .attr('class', 'mindmap-node')
+                .call(d3.drag()
+                    .on('start', dragstarted)
+                    .on('drag', dragged)
+                    .on('end', dragended));
+
+            // Add circles to nodes
+            node.selectAll('circle').remove();
+            node.append('circle')
+                .attr('r', d => 20 + (d.level * 10))
+                .attr('fill', d => {
+                    const colors = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444'];
+                    return colors[d.level] || '#6B7280';
+                })
+                .attr('stroke', '#fff')
+                .attr('stroke-width', 2);
+
+            // Add text to nodes
+            node.selectAll('text').remove();
+            node.append('text')
+                .text(d => d.content.length > 20 ? d.content.substring(0, 20) + '...' : d.content)
+                .attr('text-anchor', 'middle')
+                .attr('dy', '.35em')
+                .attr('font-size', d => Math.max(10, 14 - d.level * 2))
+                .attr('fill', 'white')
+                .attr('font-weight', 'bold');
+
+            // Update simulation
+            simulation
+                .nodes(mindmapData.nodes)
+                .on('tick', ticked);
+
+            simulation.force('link')
+                .links(mindmapData.links);
+
+            simulation.alpha(1).restart();
+
+            // Update node count
+            document.getElementById('nodeCount').textContent = `${mindmapData.nodes.length} nodes`;
+        }
+
+        function ticked() {
+            link
+                .attr('x1', d => d.source.x)
+                .attr('y1', d => d.source.y)
+                .attr('x2', d => d.target.x)
+                .attr('y2', d => d.target.y);
+
+            node
+                .attr('transform', d => `translate(${d.x},${d.y})`);
+        }
+
+        function dragstarted(event, d) {
+            if (!event.active) simulation.alphaTarget(0.3).restart();
+            d.fx = d.x;
+            d.fy = d.y;
+        }
+
+        function dragged(event, d) {
+            d.fx = event.x;
+            d.fy = event.y;
+        }
+
+        function dragended(event, d) {
+            if (!event.active) simulation.alphaTarget(0);
+            d.fx = null;
+            d.fy = null;
+        }
+
+        // Event listeners
+        document.getElementById('createSessionBtn').addEventListener('click', createSession);
+        document.getElementById('loadSessionBtn').addEventListener('click', loadSession);
+        document.getElementById('stopRecordingBtn').addEventListener('click', stopRecording);
+        document.getElementById('toggleLogs').addEventListener('click', toggleLogsPanel);
+        document.getElementById('clearLogsBtn').addEventListener('click', clearLogs);
+        document.getElementById('generateCodeBtn').addEventListener('click', () => {
+            generateSessionCode();
+            // Re-initialize icons after DOM change
+            setTimeout(() => lucide.createIcons(), 100);
+        });
+
+        async function createSession() {
+            let sessionCode = document.getElementById('sessionCodeInput').value.trim();
+            const mainTopic = document.getElementById('mainTopicInput').value.trim();
+            const interval = parseInt(document.getElementById('intervalSelect').value) * 1000;
+
+            if (!mainTopic) {
+                alert('Please enter the main discussion topic');
+                return;
+            }
+
+            // Generate new code if empty
+            if (!sessionCode) {
+                generateSessionCode();
+                sessionCode = document.getElementById('sessionCodeInput').value.trim();
+            }
+
+            try {
+                const response = await fetch('/api/mindmap/session', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ sessionCode, mainTopic, interval })
+                });
+
+                const result = await response.json();
+                if (result.success) {
+                    currentSession = { code: sessionCode, mainTopic, interval };
+                    showSessionInfo();
+                    await startRecording();
+                    await loadMindmapData();
+                } else {
+                    alert('Failed to create session: ' + result.error);
+                }
+            } catch (error) {
+                console.error('Error creating session:', error);
+                alert('Failed to create session');
+            }
+        }
+
+        async function loadSession() {
+            const sessionCode = document.getElementById('sessionCodeInput').value.trim();
+            if (!sessionCode) {
+                alert('Please enter a session code');
+                return;
+            }
+
+            try {
+                await loadMindmapData(sessionCode);
+                currentSession = { code: sessionCode };
+                showSessionInfo();
+            } catch (error) {
+                alert('Failed to load session');
+            }
+        }
+
+        async function loadMindmapData(sessionCode = null) {
+            const code = sessionCode || currentSession?.code;
+            if (!code) return;
+
+            try {
+                const response = await fetch(`/api/mindmap/${code}`);
+                const data = await response.json();
+
+                if (data.success) {
+                    // Convert nodes to D3 format
+                    mindmapData.nodes = data.nodes.map(node => ({
+                        id: node._id,
+                        content: node.content,
+                        level: node.level,
+                        parent_id: node.parent_id,
+                        x: node.x || 0,
+                        y: node.y || 0
+                    }));
+
+                    // Create links
+                    mindmapData.links = [];
+                    data.nodes.forEach(node => {
+                        if (node.parent_id) {
+                            mindmapData.links.push({
+                                source: node.parent_id,
+                                target: node._id
+                            });
+                        }
+                    });
+
+                    updateVisualization();
+                    displayLogs(data.logs);
+                    
+                    // Show visualization
+                    document.getElementById('emptyState').style.display = 'none';
+                    document.getElementById('mindmapSvg').classList.remove('hidden');
+                }
+            } catch (error) {
+                console.error('Error loading mindmap data:', error);
+            }
+        }
+
+        function showSessionInfo() {
+            document.getElementById('setupPanel').style.display = 'none';
+            document.getElementById('sessionInfo').classList.remove('hidden');
+            document.getElementById('activeSessionCode').textContent = currentSession.code;
+            document.getElementById('activeMainTopic').textContent = currentSession.mainTopic || '-';
+            document.getElementById('sessionCode').textContent = currentSession.code;
+        }
+
+        async function startRecording() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                
+                mediaRecorder = new MediaRecorder(stream);
+                const chunks = [];
+
+                mediaRecorder.ondataavailable = (event) => {
+                    chunks.push(event.data);
+                };
+
+                mediaRecorder.onstop = async () => {
+                    const audioBlob = new Blob(chunks, { type: 'audio/webm' });
+                    await processAudio(audioBlob);
+                    chunks.length = 0;
+                };
+
+                // Start recording in intervals
+                const intervalMs = currentSession.interval || 30000;
+                recordingInterval = setInterval(() => {
+                    if (mediaRecorder.state === 'recording') {
+                        mediaRecorder.stop();
+                    }
+                    mediaRecorder.start();
+                }, intervalMs);
+
+                mediaRecorder.start();
+                isRecording = true;
+                document.getElementById('recordingControls').classList.remove('hidden');
+
+            } catch (error) {
+                console.error('Error starting recording:', error);
+                alert('Failed to start recording. Please check microphone permissions.');
+            }
+        }
+
+        async function processAudio(audioBlob) {
+            try {
+                // Transcribe audio (reuse existing transcription logic)
+                const formData = new FormData();
+                formData.append('audio', audioBlob, 'audio.webm');
+
+                const transcribeResponse = await fetch('/api/transcribe', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const transcribeResult = await transcribeResponse.json();
+                if (transcribeResult.text) {
+                    // Process transcript for mindmap
+                    const processResponse = await fetch('/api/mindmap/process', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            sessionCode: currentSession.code,
+                            transcript: transcribeResult.text
+                        })
+                    });
+
+                    const processResult = await processResponse.json();
+                    if (processResult.success && processResult.newNode) {
+                        // Add new node to mindmap
+                        const newNode = {
+                            id: processResult.newNode._id,
+                            content: processResult.newNode.content,
+                            level: processResult.newNode.level,
+                            parent_id: processResult.newNode.parent_id,
+                            x: processResult.newNode.x,
+                            y: processResult.newNode.y
+                        };
+
+                        mindmapData.nodes.push(newNode);
+
+                        if (newNode.parent_id) {
+                            mindmapData.links.push({
+                                source: newNode.parent_id,
+                                target: newNode.id
+                            });
+                        }
+
+                        updateVisualization();
+                    }
+
+                    // Add to logs
+                    addLog({
+                        type: processResult.action === 'ignore' ? 'ignored_chatter' : 'processed_content',
+                        content: transcribeResult.text,
+                        ai_response: processResult,
+                        created_at: Date.now()
+                    });
+                }
+            } catch (error) {
+                console.error('Error processing audio:', error);
+            }
+        }
+
+        function stopRecording() {
+            if (mediaRecorder && isRecording) {
+                mediaRecorder.stop();
+                clearInterval(recordingInterval);
+                isRecording = false;
+                document.getElementById('recordingControls').classList.add('hidden');
+                
+                // Stop all tracks
+                mediaRecorder.stream.getTracks().forEach(track => track.stop());
+            }
+        }
+
+        function toggleLogsPanel() {
+            const panel = document.getElementById('logsPanel');
+            const button = document.getElementById('toggleLogs');
+            
+            if (panel.classList.contains('hidden')) {
+                panel.classList.remove('hidden');
+                button.textContent = 'Hide Logs';
+            } else {
+                panel.classList.add('hidden');
+                button.textContent = 'Show Logs';
+            }
+        }
+
+        function displayLogs(logs) {
+            const container = document.getElementById('logsContainer');
+            container.innerHTML = '';
+
+            if (!logs || logs.length === 0) {
+                container.innerHTML = '<div class="text-gray-500 text-sm text-center py-8">No logs yet</div>';
+                return;
+            }
+
+            logs.forEach(log => addLog(log));
+        }
+
+        function addLog(log) {
+            const container = document.getElementById('logsContainer');
+            
+            // Remove "no logs" message
+            if (container.querySelector('.text-center')) {
+                container.innerHTML = '';
+            }
+
+            const logElement = document.createElement('div');
+            logElement.className = `p-3 rounded-lg border ${
+                log.type === 'ignored_chatter' ? 'bg-gray-50 border-gray-200' : 
+                'bg-blue-50 border-blue-200'
+            }`;
+
+            const time = new Date(log.created_at).toLocaleTimeString();
+            const actionIcon = log.ai_response?.action === 'ignore' ? 'eye-off' : 'plus-circle';
+            const actionColor = log.ai_response?.action === 'ignore' ? 'text-gray-600' : 'text-green-600';
+
+            logElement.innerHTML = `
+                <div class="flex items-start space-x-2">
+                    <i data-lucide="${actionIcon}" class="w-4 h-4 ${actionColor} mt-0.5 flex-shrink-0"></i>
+                    <div class="flex-1 min-w-0">
+                        <div class="text-xs text-gray-500 mb-1">${time}</div>
+                        <div class="text-sm text-gray-800 mb-2">"${log.content.substring(0, 100)}${log.content.length > 100 ? '...' : ''}"</div>
+                        <div class="text-xs ${actionColor}">${log.ai_response?.reason || 'Processed'}</div>
+                    </div>
+                </div>
+            `;
+
+            container.insertBefore(logElement, container.firstChild);
+            
+            // Limit to 50 logs
+            const logs = container.querySelectorAll('div.p-3');
+            if (logs.length > 50) {
+                logs[logs.length - 1].remove();
+            }
+
+            // Re-initialize Lucide icons
+            lucide.createIcons();
+        }
+
+        function clearLogs() {
+            document.getElementById('logsContainer').innerHTML = 
+                '<div class="text-gray-500 text-sm text-center py-8">No logs yet</div>';
+        }
+
+        // Auto-refresh mindmap data every 30 seconds
+        setInterval(() => {
+            if (currentSession && !isRecording) {
+                loadMindmapData();
+            }
+        }, 30000);
+    </script>
+</body>
+</html> 

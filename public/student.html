@@ -790,6 +790,19 @@
             console.log(`🎬 Session started recording${isPageVisible ? '' : ' [BACKGROUND]'}`);
             recordingInterval = interval;
             chunkInterval = interval; // Update chunk interval to match admin setting
+            recordingStart = Date.now(); // Set recording start time here too
+            
+            // Start elapsed timer immediately when recording starts
+            if (elapsedInterval) {
+                clearInterval(elapsedInterval);
+            }
+            elapsedInterval = setInterval(() => {
+                const elapsed = Math.floor((Date.now() - recordingStart) / 1000);
+                const m = Math.floor(elapsed / 60);
+                const s = elapsed % 60;
+                document.getElementById('timeElapsed').textContent = `${m}:${s.toString().padStart(2,'0')}`;
+            }, 1000);
+            
             startRecording();
         });
 

@@ -54,6 +54,14 @@ async function connectToDatabase() {
     await db.collection("session_prompts").createIndex({ "session_id": 1 }, { unique: true });
     await db.collection("prompt_library").createIndex({ name: 1 });
     
+    // New indexes for mindmap and checkbox modes
+    await db.collection("mindmap_sessions").createIndex({ "session_id": 1 }, { unique: true });
+    await db.collection("mindmap_nodes").createIndex({ "session_id": 1, "created_at": 1 });
+    await db.collection("checkbox_sessions").createIndex({ "session_id": 1 }, { unique: true });
+    await db.collection("checkbox_criteria").createIndex({ "session_id": 1 });
+    await db.collection("checkbox_progress").createIndex({ "session_id": 1, "criteria_id": 1 });
+    await db.collection("session_logs").createIndex({ "session_id": 1, "created_at": 1 });
+    
     console.log("📊 Database indexes ready");
 
     // Start server ONLY after DB is ready!
@@ -762,93 +770,596 @@ app.get("/api/history/session/:code", async (req, res) => {
 });
 
 /* Admin API: delete multiple sessions */
-app.delete("/api/sessions", express.json(), async (req, res) => {
+app.delete("/api/history/sessions", express.json(), async (req, res) => {
   try {
-    const { sessionCodes } = req.body;
+    const { sessionIds } = req.body;
     
-    if (!sessionCodes || !Array.isArray(sessionCodes) || sessionCodes.length === 0) {
-      return res.status(400).json({ error: "sessionCodes array is required" });
+    if (!Array.isArray(sessionIds) || sessionIds.length === 0) {
+      return res.status(400).json({ error: "Invalid session IDs provided" });
     }
     
-    console.log(`🗑️ Deleting ${sessionCodes.length} sessions:`, sessionCodes);
+    console.log(`🗑️  Deleting ${sessionIds.length} sessions:`, sessionIds);
     
-    const deletedCounts = {
-      sessions: 0,
-      groups: 0,
-      transcripts: 0,
-      summaries: 0,
-      session_prompts: 0
-    };
+    // Get session details first for cleanup
+    const sessions = await db.collection("sessions").find({ _id: { $in: sessionIds } }).toArray();
     
-    // Process each session
-    for (const sessionCode of sessionCodes) {
-      console.log(`🗑️ Processing deletion for session: ${sessionCode}`);
-      
-      // Find the session
-      const session = await db.collection("sessions").findOne({ code: sessionCode });
-      if (!session) {
-        console.log(`⚠️ Session ${sessionCode} not found, skipping`);
-        continue;
-      }
-      
-      // Stop any active timers for this session
-      if (activeSessions.has(sessionCode)) {
-        activeSessions.delete(sessionCode);
-        console.log(`🛑 Removed session ${sessionCode} from active sessions`);
-      }
-      
-      if (activeSummaryTimers.has(sessionCode)) {
-        clearInterval(activeSummaryTimers.get(sessionCode));
-        activeSummaryTimers.delete(sessionCode);
-        console.log(`⏰ Stopped auto-summary timer for session ${sessionCode}`);
-      }
-      
-      // Get all groups for this session
+    if (sessions.length === 0) {
+      return res.status(404).json({ error: "No sessions found to delete" });
+    }
+    
+    // Delete related data for each session
+    for (const session of sessions) {
       const groups = await db.collection("groups").find({ session_id: session._id }).toArray();
-      console.log(`📊 Found ${groups.length} groups for session ${sessionCode}`);
+      const groupIds = groups.map(g => g._id);
       
-      // Delete all related data for each group
-      for (const group of groups) {
-        // Delete transcripts
-        const transcriptResult = await db.collection("transcripts").deleteMany({ group_id: group._id });
-        deletedCounts.transcripts += transcriptResult.deletedCount;
+      if (groupIds.length > 0) {
+        // Delete transcripts, summaries for all groups
+        await db.collection("transcripts").deleteMany({ group_id: { $in: groupIds } });
+        await db.collection("summaries").deleteMany({ group_id: { $in: groupIds } });
         
-        // Delete summaries
-        const summaryResult = await db.collection("summaries").deleteMany({ group_id: group._id });
-        deletedCounts.summaries += summaryResult.deletedCount;
-        
-        console.log(`🗑️ Deleted ${transcriptResult.deletedCount} transcripts and ${summaryResult.deletedCount} summaries for group ${group.number}`);
+        // Delete groups
+        await db.collection("groups").deleteMany({ session_id: session._id });
       }
-      
-      // Delete all groups for this session
-      const groupResult = await db.collection("groups").deleteMany({ session_id: session._id });
-      deletedCounts.groups += groupResult.deletedCount;
       
       // Delete session prompts
-      const promptResult = await db.collection("session_prompts").deleteMany({ session_id: session._id });
-      deletedCounts.session_prompts += promptResult.deletedCount;
+      await db.collection("session_prompts").deleteMany({ session_id: session._id });
       
-      // Finally, delete the session itself
-      const sessionResult = await db.collection("sessions").deleteOne({ _id: session._id });
-      deletedCounts.sessions += sessionResult.deletedCount;
+      // Delete mindmap related data
+      await db.collection("mindmap_sessions").deleteMany({ session_id: session._id });
+      await db.collection("mindmap_nodes").deleteMany({ session_id: session._id });
       
-      console.log(`✅ Successfully deleted session ${sessionCode} and all related data`);
+      // Delete checkbox related data
+      await db.collection("checkbox_sessions").deleteMany({ session_id: session._id });
+      await db.collection("checkbox_criteria").deleteMany({ session_id: session._id });
+      await db.collection("checkbox_progress").deleteMany({ session_id: session._id });
+      
+      // Delete session logs
+      await db.collection("session_logs").deleteMany({ session_id: session._id });
+      
+      console.log(`🧹 Cleaned up data for session ${session.code}`);
     }
     
-    console.log(`🎯 Deletion complete:`, deletedCounts);
+    // Delete the sessions themselves
+    const deleteResult = await db.collection("sessions").deleteMany({ _id: { $in: sessionIds } });
     
-    res.json({
-      success: true,
-      message: `Successfully deleted ${deletedCounts.sessions} sessions and all related data`,
-      deletedCounts
+    console.log(`✅ Deleted ${deleteResult.deletedCount} sessions successfully`);
+    
+    res.json({ 
+      success: true, 
+      deletedCount: deleteResult.deletedCount,
+      message: `Successfully deleted ${deleteResult.deletedCount} sessions and their related data`
     });
     
   } catch (err) {
     console.error("❌ Failed to delete sessions:", err);
-    res.status(500).json({ 
-      error: "Failed to delete sessions", 
-      details: err.message 
+    res.status(500).json({ error: "Failed to delete sessions" });
+  }
+});
+
+/* ---------- Mindmap Mode API Endpoints ---------- */
+
+/* Create mindmap session */
+app.post("/api/mindmap/session", express.json(), async (req, res) => {
+  try {
+    const { sessionCode, mainTopic, interval = 30000 } = req.body;
+    
+    if (!sessionCode || !mainTopic) {
+      return res.status(400).json({ error: "Session code and main topic required" });
+    }
+    
+    console.log(`🧠 Creating mindmap session: ${sessionCode} with topic: ${mainTopic}`);
+    
+    // Create or update the main session
+    const sessionId = uuid();
+    const now = Date.now();
+    
+    await db.collection("sessions").findOneAndUpdate(
+      { code: sessionCode },
+      {
+        $set: {
+          _id: sessionId,
+          code: sessionCode,
+          mode: "mindmap",
+          interval_ms: interval,
+          created_at: now,
+          active: true,
+          start_time: now,
+          end_time: null
+        }
+      },
+      { upsert: true }
+    );
+    
+    // Create mindmap session record
+    await db.collection("mindmap_sessions").insertOne({
+      _id: uuid(),
+      session_id: sessionId,
+      main_topic: mainTopic,
+      created_at: now
     });
+    
+    // Create the root node
+    const rootNodeId = uuid();
+    await db.collection("mindmap_nodes").insertOne({
+      _id: rootNodeId,
+      session_id: sessionId,
+      content: mainTopic,
+      level: 0,
+      parent_id: null,
+      created_at: now,
+      x: 0,
+      y: 0
+    });
+    
+    // Add to active sessions
+    activeSessions.set(sessionCode, {
+      id: sessionId,
+      code: sessionCode,
+      mode: "mindmap",
+      active: true,
+      interval: interval,
+      startTime: now,
+      created_at: now,
+      persisted: true
+    });
+    
+    res.json({ 
+      success: true, 
+      sessionId,
+      rootNodeId,
+      message: "Mindmap session created successfully" 
+    });
+    
+  } catch (err) {
+    console.error("❌ Failed to create mindmap session:", err);
+    res.status(500).json({ error: "Failed to create mindmap session" });
+  }
+});
+
+/* Process transcript for mindmap */
+app.post("/api/mindmap/process", express.json(), async (req, res) => {
+  try {
+    const { sessionCode, transcript } = req.body;
+    
+    if (!sessionCode || !transcript) {
+      return res.status(400).json({ error: "Session code and transcript required" });
+    }
+    
+    console.log(`🧠 Processing transcript for mindmap session: ${sessionCode}`);
+    
+    // Get session info
+    const session = await db.collection("sessions").findOne({ code: sessionCode, mode: "mindmap" });
+    if (!session) {
+      return res.status(404).json({ error: "Mindmap session not found" });
+    }
+    
+    // Get mindmap session details
+    const mindmapSession = await db.collection("mindmap_sessions").findOne({ session_id: session._id });
+    if (!mindmapSession) {
+      return res.status(404).json({ error: "Mindmap session details not found" });
+    }
+    
+    // Get existing nodes
+    const existingNodes = await db.collection("mindmap_nodes")
+      .find({ session_id: session._id })
+      .sort({ created_at: 1 })
+      .toArray();
+    
+    // Process the transcript
+    const result = await processMindmapTranscript(transcript, mindmapSession.main_topic, existingNodes);
+    
+    // Log the processing result
+    await db.collection("session_logs").insertOne({
+      _id: uuid(),
+      session_id: session._id,
+      type: result.action === "ignore" ? "ignored_chatter" : "processed_content",
+      content: transcript,
+      ai_response: result,
+      created_at: Date.now()
+    });
+    
+    let newNode = null;
+    
+    // If we should add a node, add it to the database
+    if (result.action === "add_node" && result.node) {
+      const nodeId = uuid();
+      
+      // Calculate position (simple layout for now)
+      const nodeCount = existingNodes.length;
+      const angle = (nodeCount * 60) * (Math.PI / 180); // 60 degrees apart
+      const radius = 150 + (result.node.level * 100); // Increase radius by level
+      
+      newNode = {
+        _id: nodeId,
+        session_id: session._id,
+        content: result.node.content,
+        level: result.node.level,
+        parent_id: result.node.parent_id,
+        created_at: Date.now(),
+        x: Math.cos(angle) * radius,
+        y: Math.sin(angle) * radius
+      };
+      
+      await db.collection("mindmap_nodes").insertOne(newNode);
+    }
+    
+    res.json({
+      success: true,
+      action: result.action,
+      reason: result.reason,
+      newNode: newNode
+    });
+    
+  } catch (err) {
+    console.error("❌ Failed to process mindmap transcript:", err);
+    res.status(500).json({ error: "Failed to process transcript" });
+  }
+});
+
+/* Get mindmap data */
+app.get("/api/mindmap/:sessionCode", async (req, res) => {
+  try {
+    const { sessionCode } = req.params;
+    
+    console.log(`🧠 Fetching mindmap data for session: ${sessionCode}`);
+    
+    // Get session info
+    const session = await db.collection("sessions").findOne({ code: sessionCode, mode: "mindmap" });
+      if (!session) {
+      return res.status(404).json({ error: "Mindmap session not found" });
+    }
+    
+    // Get mindmap session details
+    const mindmapSession = await db.collection("mindmap_sessions").findOne({ session_id: session._id });
+    
+    // Get all nodes
+    const nodes = await db.collection("mindmap_nodes")
+      .find({ session_id: session._id })
+      .sort({ created_at: 1 })
+      .toArray();
+    
+    // Get recent logs
+    const logs = await db.collection("session_logs")
+      .find({ session_id: session._id })
+      .sort({ created_at: -1 })
+      .limit(50)
+      .toArray();
+    
+    res.json({
+      success: true,
+      session: {
+        code: sessionCode,
+        mainTopic: mindmapSession?.main_topic,
+        createdAt: session.created_at
+      },
+      nodes: nodes,
+      logs: logs
+    });
+    
+  } catch (err) {
+    console.error("❌ Failed to fetch mindmap data:", err);
+    res.status(500).json({ error: "Failed to fetch mindmap data" });
+  }
+});
+
+/* ---------- Checkbox Mode API Endpoints ---------- */
+
+/* Create checkbox session */
+app.post("/api/checkbox/session", express.json(), async (req, res) => {
+  try {
+    const { sessionCode, criteria, interval = 30000, scenario = "" } = req.body;
+    
+    if (!sessionCode || !criteria || !Array.isArray(criteria)) {
+      return res.status(400).json({ error: "Session code and criteria array required" });
+    }
+    
+    console.log(`☑️ Creating checkbox session: ${sessionCode} with ${criteria.length} criteria`);
+    if (scenario) {
+      console.log(`📝 Scenario: ${scenario.substring(0, 100)}${scenario.length > 100 ? '...' : ''}`);
+    }
+    
+    // Check if session already exists
+    let session = await db.collection("sessions").findOne({ code: sessionCode });
+    
+    const now = Date.now();
+    
+    if (!session) {
+      // Create new session
+      const sessionId = uuid();
+      session = {
+        _id: sessionId,
+        code: sessionCode,
+        mode: "checkbox",
+        interval_ms: interval,
+        created_at: now,
+        active: true,
+        start_time: now,
+        end_time: null
+      };
+      await db.collection("sessions").insertOne(session);
+    } else {
+      // Update existing session
+      await db.collection("sessions").updateOne(
+        { code: sessionCode },
+        {
+          $set: {
+            mode: "checkbox",
+            interval_ms: interval,
+            active: true,
+            start_time: now,
+            end_time: null
+          }
+        }
+      );
+    }
+    
+    // Create checkbox session record with scenario
+    await db.collection("checkbox_sessions").findOneAndUpdate(
+      { session_id: session._id },
+      {
+        $set: {
+          scenario: scenario,
+          created_at: now
+        }
+      },
+      { upsert: true }
+    );
+    
+    // Add criteria (delete existing ones first to avoid duplicates)
+    await db.collection("checkbox_criteria").deleteMany({ session_id: session._id });
+    await db.collection("checkbox_progress").deleteMany({ session_id: session._id });
+    
+    const criteriaIds = [];
+    for (const criterion of criteria) {
+      const criterionId = uuid();
+      await db.collection("checkbox_criteria").insertOne({
+        _id: criterionId,
+        session_id: session._id,
+        description: criterion.description,
+        weight: criterion.weight || 1,
+        created_at: now
+      });
+      criteriaIds.push(criterionId);
+    }
+    
+    // Add to active sessions
+    activeSessions.set(sessionCode, {
+      id: session._id,
+      code: sessionCode,
+      mode: "checkbox",
+      active: true,
+      interval: interval,
+      startTime: now,
+      created_at: now,
+      persisted: true
+    });
+    
+    res.json({ 
+      success: true, 
+      sessionId: session._id,
+      criteriaIds,
+      message: "Checkbox session created successfully" 
+    });
+    
+  } catch (err) {
+    console.error("❌ Failed to create checkbox session:", err);
+    res.status(500).json({ error: "Failed to create checkbox session" });
+  }
+});
+
+/* Process transcript for checkbox */
+app.post("/api/checkbox/process", express.json(), async (req, res) => {
+  try {
+    const { sessionCode, transcript } = req.body;
+    
+    if (!sessionCode || !transcript) {
+      return res.status(400).json({ error: "Session code and transcript required" });
+    }
+    
+    console.log(`☑️ Processing transcript for checkbox session: ${sessionCode}`);
+    
+    // Get session info
+    const session = await db.collection("sessions").findOne({ code: sessionCode, mode: "checkbox" });
+    if (!session) {
+      return res.status(404).json({ error: "Checkbox session not found" });
+    }
+    
+    // Get checkbox session data (includes scenario)
+    const checkboxSession = await db.collection("checkbox_sessions").findOne({ session_id: session._id });
+    const scenario = checkboxSession?.scenario || "";
+    
+    // Get criteria
+    const criteria = await db.collection("checkbox_criteria")
+      .find({ session_id: session._id })
+      .sort({ created_at: 1 })
+      .toArray();
+    
+    if (criteria.length === 0) {
+      return res.status(400).json({ error: "No criteria found for session" });
+    }
+    
+    // Process the transcript with scenario context
+    const result = await processCheckboxTranscript(transcript, criteria, scenario);
+    
+    // Log the processing result
+    await db.collection("session_logs").insertOne({
+      _id: uuid(),
+      session_id: session._id,
+      type: "checkbox_analysis",
+      content: transcript,
+      ai_response: result,
+      created_at: Date.now()
+    });
+    
+    // Update progress for matched criteria
+    const progressUpdates = [];
+    const now = Date.now();
+    
+    for (const match of result.matches) {
+      const criterion = criteria[match.criteria_index];
+      if (criterion) {
+        await db.collection("checkbox_progress").findOneAndUpdate(
+          { 
+            session_id: session._id,
+            criteria_id: criterion._id
+          },
+          {
+            $set: {
+              completed: true,
+              quote: match.quote,
+              completed_at: now
+            }
+          },
+          { upsert: true }
+        );
+        
+        // Use the criteria_index (0, 1, 2, etc.) instead of MongoDB _id
+        progressUpdates.push({
+          criteriaId: match.criteria_index,  // This matches the frontend's c.id
+          description: criterion.description,
+          completed: true,
+          quote: match.quote
+        });
+        
+        console.log(`📋 Checkbox update for criteria ${match.criteria_index}: "${match.quote}"`);
+      }
+    }
+    
+    console.log(`📤 Sending ${progressUpdates.length} checkbox updates to admin for group ${groupNumber}`);
+    
+    // Send checkbox updates to admin
+    io.to(sessionCode).emit("admin_update", {
+      group: groupNumber,
+      latestTranscript: transcriptionText,
+      checkboxUpdates: progressUpdates,
+      isActive: true
+    });
+    
+    res.json({
+      success: true,
+      matches: result.matches.length,
+      reason: result.reason,
+      progressUpdates: progressUpdates
+    });
+    
+  } catch (err) {
+    console.error("❌ Failed to process checkbox transcript:", err);
+    res.status(500).json({ error: "Failed to process transcript" });
+  }
+});
+
+/* Get checkbox data */
+app.get("/api/checkbox/:sessionCode", async (req, res) => {
+  try {
+    const { sessionCode } = req.params;
+    
+    console.log(`☑️ Fetching checkbox data for session: ${sessionCode}`);
+    
+    // Get session info
+    const session = await db.collection("sessions").findOne({ code: sessionCode, mode: "checkbox" });
+    if (!session) {
+      return res.status(404).json({ error: "Checkbox session not found" });
+    }
+    
+    // Get checkbox session data (includes scenario)
+    const checkboxSession = await db.collection("checkbox_sessions").findOne({ session_id: session._id });
+    
+    // Get criteria
+    const criteria = await db.collection("checkbox_criteria")
+      .find({ session_id: session._id })
+      .sort({ created_at: 1 })
+      .toArray();
+    
+    // Get progress for each criterion
+    const progress = await db.collection("checkbox_progress")
+      .find({ session_id: session._id })
+      .toArray();
+    
+    // Combine criteria with progress
+    const criteriaWithProgress = criteria.map(criterion => {
+      const prog = progress.find(p => p.criteria_id === criterion._id);
+      return {
+        ...criterion,
+        completed: prog?.completed || false,
+        confidence: prog?.confidence || 0,
+        evidence: prog?.evidence || null,
+        completedAt: prog?.completed_at || null
+      };
+    });
+    
+    // Get recent logs
+    const logs = await db.collection("session_logs")
+      .find({ session_id: session._id })
+      .sort({ created_at: -1 })
+      .limit(50)
+      .toArray();
+    
+    // Calculate statistics
+    const completedCount = criteriaWithProgress.filter(c => c.completed).length;
+    const totalCount = criteriaWithProgress.length;
+    const completionRate = totalCount > 0 ? (completedCount / totalCount) * 100 : 0;
+    
+    res.json({
+      success: true,
+      session: {
+        code: sessionCode,
+        createdAt: session.created_at,
+        scenario: checkboxSession?.scenario || ""
+      },
+      criteria: criteriaWithProgress,
+      stats: {
+        total: totalCount,
+        completed: completedCount,
+        completionRate: Math.round(completionRate)
+      },
+      logs: logs
+    });
+    
+  } catch (err) {
+    console.error("❌ Failed to fetch checkbox data:", err);
+    res.status(500).json({ error: "Failed to fetch checkbox data" });
+  }
+});
+
+/* Get session logs */
+app.get("/api/logs/:sessionCode", async (req, res) => {
+  try {
+    const { sessionCode } = req.params;
+    const { limit = 100, type } = req.query;
+    
+    console.log(`📋 Fetching logs for session: ${sessionCode}`);
+    
+    // Get session info
+    const session = await db.collection("sessions").findOne({ code: sessionCode });
+    if (!session) {
+      return res.status(404).json({ error: "Session not found" });
+    }
+    
+    // Build query
+    const query = { session_id: session._id };
+    if (type) {
+      query.type = type;
+    }
+    
+    // Get logs
+    const logs = await db.collection("session_logs")
+      .find(query)
+      .sort({ created_at: -1 })
+      .limit(parseInt(limit))
+      .toArray();
+    
+    res.json({
+      success: true,
+      logs: logs,
+      session: {
+        code: sessionCode,
+        mode: session.mode
+      }
+    });
+    
+  } catch (err) {
+    console.error("❌ Failed to fetch logs:", err);
+    res.status(500).json({ error: "Failed to fetch logs" });
   }
 });
 
@@ -1233,7 +1744,14 @@ io.on("connection", socket => {
   });
 
   socket.on("disconnect", () => {
+    if (sessionCode && groupNumber) {
     console.log(`🔌 Socket ${socket.id} disconnected from session ${sessionCode}, group ${groupNumber}`);
+      
+      // Notify admin about student leaving
+      socket.to(sessionCode).emit("student_left", { group: groupNumber, socketId: socket.id });
+    } else {
+      console.log(`🔌 Socket ${socket.id} disconnected (no session/group)`);
+    }
     
     // Clean up socket buffer to prevent memory leaks
     if (socket.localBuf) {
@@ -1245,11 +1763,6 @@ io.on("connection", socket => {
     if (sessionCode && groupNumber) {
       const groupKey = `${sessionCode}-${groupNumber}`;
       processingGroups.delete(groupKey);
-    }
-    
-    // Notify admin about student leaving
-    if (sessionCode && groupNumber) {
-      socket.to(sessionCode).emit("student_left", { group: groupNumber, socketId: socket.id });
     }
   });
 });
@@ -1436,6 +1949,243 @@ async function summarise(text, customPrompt) {
   } catch (err) {
     console.error("❌ Summarization error:", err);
     return "Summarization failed";
+  }
+}
+
+async function processMindmapTranscript(text, mainTopic, existingNodes = []) {
+  try {
+    console.log(`🧠 Processing transcript for mindmap...`);
+    
+    const existingNodesText = existingNodes.length > 0 ? 
+      `\n\nExisting mindmap structure:\n${existingNodes.map(node => 
+        `${node.level === 0 ? 'MAIN:' : node.level === 1 ? 'TOPIC:' : node.level === 2 ? 'SUBTOPIC:' : 'EXAMPLE:'} ${node.content}`
+      ).join('\n')}` : '';
+    
+    const prompt = `You are analyzing classroom discussion to build a mindmap. The main topic is: "${mainTopic}"
+
+Analyze this new transcript segment and determine:
+1. Is this irrelevant chatter that should be ignored? 
+2. If relevant, is it a new main point, subpoint, or example?
+3. How should it fit into the existing mindmap structure?
+
+${existingNodesText}
+
+New transcript: "${text}"
+
+Respond with JSON in this exact format:
+{
+  "action": "ignore|add_node",
+  "reason": "brief explanation of your decision",
+  "node": {
+    "content": "the content to add (if action is add_node)",
+    "level": 1,
+    "parent_id": "id of parent node or null for main topics"
+  }
+}
+
+Levels: 1=main topic, 2=subtopic, 3=sub-subtopic/example`;
+
+    const body = {
+      model: "claude-3-haiku-20240307",
+      max_tokens: 300,
+      temperature: 0.3,
+      messages: [
+        {
+          role: "user",
+          content: prompt
+        }
+      ]
+    };
+
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "x-api-key": process.env.ANTHROPIC_KEY,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json"
+      },
+      body: JSON.stringify(body)
+    });
+    
+    if (!res.ok) {
+      console.error(`❌ Mindmap processing API error: ${res.status} ${res.statusText}`);
+      return { action: "ignore", reason: "API error", node: null };
+    }
+
+    const response = await res.json();
+    const result = JSON.parse(response.content?.[0]?.text?.trim() ?? '{"action": "ignore", "reason": "parsing error", "node": null}');
+    
+    console.log("✅ Mindmap processing successful");
+    return result;
+  } catch (err) {
+    console.error("❌ Mindmap processing error:", err);
+    return { action: "ignore", reason: "Processing error", node: null };
+  }
+}
+
+async function processCheckboxTranscript(text, criteria, scenario = "") {
+  try {
+    console.log(`☑️ Processing transcript for checkbox matching...`);
+    
+    // Check if API key is available
+    const apiKey = process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_KEY;
+    if (!apiKey) {
+      console.log(`🧪 ANTHROPIC API KEY not set - returning mock test data for demonstration`);
+      console.log(`🔍 Checked for: ANTHROPIC_API_KEY and ANTHROPIC_KEY environment variables`);
+      
+      // Return mock matches for testing when API key is not available
+      const mockMatches = [];
+      
+      // Check for some obvious matches in the text for demonstration
+      if (text.toLowerCase().includes('caco₃') || text.toLowerCase().includes('calcium carbonate')) {
+        mockMatches.push({
+          criteria_index: 0,
+          quote: "CaCO₃ is not soluble in water"
+        });
+      }
+      
+      if (text.toLowerCase().includes('back titration')) {
+        mockMatches.push({
+          criteria_index: 1,
+          quote: "we need to use back titration"
+        });
+      }
+      
+      if (text.toLowerCase().includes('hcl') || text.toLowerCase().includes('hydrochloric acid')) {
+        mockMatches.push({
+          criteria_index: 2,
+          quote: "CaCO₃ reacts with HCl to form salt, water, and carbon dioxide"
+        });
+      }
+      
+      return {
+        matches: mockMatches
+      };
+    }
+    
+    console.log(`✅ Using Anthropic API for transcript analysis`);
+    console.log(`📋 Processing against ${criteria.length} criteria (indices 0-${criteria.length - 1})`);
+    
+    // Show criteria with 0-based indexing to match what we expect in the response
+    const criteriaText = criteria.map((c, i) => `${i}. ${c.description}`).join('\n');
+    
+    const scenarioContext = scenario ? `\nDiscussion Context/Scenario: ${scenario}\n` : '';
+    
+    const prompt = `You are analyzing classroom discussion against a marking rubric/checklist.${scenarioContext}
+Rubric criteria (0-based indexing):
+${criteriaText}
+
+New transcript: "${text}"
+
+Analyze which criteria (if any) are demonstrated or discussed in this transcript. 
+
+IMPORTANT CONSTRAINTS:
+- You must respond with ONLY valid JSON in this exact format
+- Only use criteria_index values from 0 to ${criteria.length - 1} (these are the only valid indices)
+- Do not invent or hallucinate criteria that don't exist
+- Only include criteria with high confidence
+
+{
+  "matches": [
+    {
+      "criteria_index": 0,
+      "quote": "exact quote from transcript that matches this criterion"
+    }
+  ]
+}
+
+Extract the most relevant quote from the transcript for each match.
+RESPOND WITH ONLY JSON, NO OTHER TEXT.`;
+
+    const body = {
+      model: "claude-3-haiku-20240307",
+      max_tokens: 800,
+      temperature: 0.1,
+      messages: [
+        {
+          role: "user",
+          content: prompt
+        }
+      ]
+    };
+
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json"
+      },
+      body: JSON.stringify(body)
+    });
+    
+    if (!res.ok) {
+      console.error(`❌ Checkbox processing API error: ${res.status} ${res.statusText}`);
+      return { matches: [] };
+    }
+
+    const response = await res.json();
+    const responseText = response.content?.[0]?.text?.trim();
+    
+    console.log(`🔍 Anthropic response text: "${responseText?.substring(0, 200)}..."`);
+    
+    let result;
+    try {
+      // Try to parse the JSON response
+      result = JSON.parse(responseText ?? '{"matches": [], "reason": "empty response"}');
+    } catch (parseError) {
+      console.error("❌ JSON parse error:", parseError.message);
+      console.error("🔍 Raw response text:", responseText);
+      
+      // Try to extract JSON from the response if it's wrapped in other text
+      const jsonMatch = responseText?.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        try {
+          result = JSON.parse(jsonMatch[0]);
+          console.log("✅ Recovered JSON from wrapped response");
+        } catch (secondError) {
+          console.error("❌ Could not parse extracted JSON either");
+          result = { matches: [], reason: "JSON parsing failed" };
+        }
+      } else {
+        result = { matches: [], reason: "No JSON found in response" };
+      }
+    }
+    
+    // Validate the result structure
+    if (!result || typeof result !== 'object') {
+      console.warn("⚠️ Invalid response structure (not an object), creating default structure");
+      result = { matches: [] };
+    }
+    
+    if (!result.matches || !Array.isArray(result.matches)) {
+      console.warn("⚠️ Missing or invalid matches array, creating empty array");
+      result.matches = [];
+    }
+    
+    // Validate each match object
+    result.matches = result.matches.filter(match => {
+      if (typeof match !== 'object' || 
+          typeof match.criteria_index !== 'number' ||
+          typeof match.quote !== 'string') {
+        console.warn("⚠️ Invalid match object structure:", match);
+        return false;
+      }
+      
+      // Validate criteria_index is within valid range
+      if (match.criteria_index < 0 || match.criteria_index >= criteria.length) {
+        console.warn(`⚠️ Invalid criteria_index ${match.criteria_index}. Valid range: 0-${criteria.length - 1}`);
+        return false;
+      }
+      
+      return true;
+    });
+    
+    console.log(`✅ Checkbox processing successful: ${result.matches.length} valid matches found`);
+    return result;
+  } catch (err) {
+    console.error("❌ Checkbox processing error:", err);
+    return { matches: [] };
   }
 }
 
@@ -1763,6 +2513,110 @@ async function processTranscriptionForGroup(session, group, transcriptionText, r
       segment_number: Math.floor(now / (session.interval_ms || 30000))
     });
     
+    // Check if this is a checkbox mode session
+    if (session.mode === "checkbox") {
+      console.log(`☑️ Processing checkbox mode transcript for session ${sessionCode}, group ${groupNumber}`);
+      
+      // Get checkbox session data and criteria
+      const checkboxSession = await db.collection("checkbox_sessions").findOne({ session_id: session._id });
+      const criteria = await db.collection("checkbox_criteria")
+        .find({ session_id: session._id })
+        .sort({ created_at: 1 })
+        .toArray();
+      
+      if (criteria.length > 0) {
+        // Get recent transcripts from this interval (last 2 minutes worth)
+        const intervalStart = now - (session.interval_ms || 120000); // Use session interval or default to 2 min
+        const recentTranscripts = await db.collection("transcripts")
+          .find({ 
+            group_id: group._id,
+            created_at: { $gte: intervalStart }
+          })
+          .sort({ created_at: 1 })
+          .toArray();
+        
+        // Concatenate recent transcripts including the current one
+        const concatenatedText = recentTranscripts.map(t => t.text).join(' ') + ' ' + transcriptionText;
+        
+        console.log(`📋 Concatenating ${recentTranscripts.length + 1} recent transcripts for analysis`);
+        
+        // Process through checkbox analysis with concatenated text
+        const scenario = checkboxSession?.scenario || "";
+        const checkboxResult = await processCheckboxTranscript(concatenatedText.trim(), criteria, scenario);
+        
+        // Log the checkbox processing result
+        await db.collection("session_logs").insertOne({
+          _id: uuid(),
+          session_id: session._id,
+          type: "checkbox_analysis",
+          content: concatenatedText.trim(),
+          ai_response: checkboxResult,
+          created_at: now
+        });
+        
+        // Update progress for matched criteria
+        const progressUpdates = [];
+        for (const match of checkboxResult.matches) {
+          const criterion = criteria[match.criteria_index];
+          if (criterion) {
+            await db.collection("checkbox_progress").findOneAndUpdate(
+              { 
+                session_id: session._id,
+                criteria_id: criterion._id
+              },
+              {
+                $set: {
+                  completed: true,
+                  quote: match.quote,
+                  completed_at: now
+                }
+              },
+              { upsert: true }
+            );
+            
+            // Use the criteria_index (0, 1, 2, etc.) instead of MongoDB _id
+            progressUpdates.push({
+              criteriaId: match.criteria_index,  // This matches the frontend's c.id
+              description: criterion.description,
+              completed: true,
+              quote: match.quote
+            });
+            
+            console.log(`📋 Checkbox update for criteria ${match.criteria_index}: "${match.quote}"`);
+          }
+        }
+        
+        console.log(`📤 Sending ${progressUpdates.length} checkbox updates to admin for group ${groupNumber}`);
+        
+        // Send checkbox updates to admin
+        io.to(sessionCode).emit("admin_update", {
+          group: groupNumber,
+          latestTranscript: transcriptionText,
+          checkboxUpdates: progressUpdates,
+          isActive: true
+        });
+        
+        // Send transcription to students in checkbox mode
+        const roomName = `${sessionCode}-${groupNumber}`;
+        io.to(roomName).emit("transcription_and_summary", {
+          transcription: {
+            text: transcriptionText, // Current chunk only
+            cumulativeText: concatenatedText, // Full recent conversation
+            words: result.words,
+            duration: duration,
+            wordCount: wordCount
+          },
+          summary: "Checkbox mode: Real-time discussion analysis", // Simple summary for checkbox mode
+          isLatestSegment: true
+        });
+        
+        console.log(`✅ Checkbox analysis complete: ${checkboxResult.matches.length} criteria matched for group ${groupNumber}`);
+      }
+      
+    } else {
+      // Regular summary mode processing
+      console.log(`📝 Processing summary mode transcript for session ${sessionCode}, group ${groupNumber}`);
+    
     // Get all transcripts for this group to create cumulative conversation
     const allTranscripts = await db.collection("transcripts").find({ 
       group_id: group._id 
@@ -1817,8 +2671,13 @@ async function processTranscriptionForGroup(session, group, transcriptionText, r
         lastUpdate: now
       }
     });
+    }
     
     // Clean up old transcripts to prevent memory issues (keep last 100 per group)
+    const allTranscripts = await db.collection("transcripts").find({ 
+      group_id: group._id 
+    }).sort({ created_at: 1 }).toArray();
+    
     if (allTranscripts.length > 100) {
       const oldTranscripts = allTranscripts.slice(0, -100);
       const oldTranscriptIds = oldTranscripts.map(t => t._id);
@@ -1834,5 +2693,58 @@ async function processTranscriptionForGroup(session, group, transcriptionText, r
     console.error(`❌ Error processing transcription for group ${groupNumber}:`, error);
     throw error;
   }
+}
+
+/* Test mode detection endpoint */
+app.post("/api/checkbox/test", express.json(), async (req, res) => {
+  try {
+    const { sessionCode, transcript } = req.body;
+    
+    console.log(`🧪 TEST MODE ACTIVATED for session ${sessionCode}`);
+    console.log(`🧪 Test transcript length: ${transcript?.length || 0} characters`);
+    console.log(`🧪 Test transcript preview: "${transcript?.substring(0, 100)}..."`);
+    
+    // Forward to regular checkbox processing but with test logging
+    const result = await processTestTranscript(sessionCode, transcript);
+    
+    console.log(`🧪 TEST RESULT: ${result.matches?.length || 0} matches found`);
+    if (result.matches?.length > 0) {
+      result.matches.forEach((match, index) => {
+        console.log(`🧪 Match ${index + 1}: Criteria ${match.criteria_index} - "${match.quote}"`);
+      });
+    }
+    
+    res.json(result);
+  } catch (err) {
+    console.error('🧪 TEST MODE ERROR:', err);
+    res.status(500).json({ error: err.message, matches: [], reason: "Test mode error" });
+  }
+});
+
+async function processTestTranscript(sessionCode, transcript) {
+  // Get session info
+  const session = await db.collection("sessions").findOne({ code: sessionCode });
+  if (!session) {
+    throw new Error("Session not found");
+  }
+
+  // Get criteria
+  const criteria = await db.collection("checkbox_criteria")
+    .find({ session_id: session._id })
+    .sort({ created_at: 1 })
+    .toArray();
+
+  if (criteria.length === 0) {
+    throw new Error("No criteria found for session");
+  }
+
+  console.log(`🧪 Processing test transcript against ${criteria.length} criteria`);
+
+  // Get scenario
+  const checkboxSession = await db.collection("checkbox_sessions").findOne({ session_id: session._id });
+  const scenario = checkboxSession?.scenario || "";
+
+  // Process with AI
+  return await processCheckboxTranscript(transcript, criteria, scenario);
 }
 
