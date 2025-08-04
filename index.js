@@ -105,20 +105,30 @@ app.get("/admin_static", (req, res) => {
 
 /* Serve test transcription page */
 app.get("/test-transcription", (req, res) => {
-  console.log("🧪 Serving test transcription page");
   res.sendFile(path.join(__dirname, "public", "test-transcription.html"));
 });
 
 /* Serve test recording page */
 app.get("/test-recording", (req, res) => {
-  console.log("🧪 Serving test recording page");
   res.sendFile(path.join(__dirname, "public", "test-recording.html"));
 });
 
 /* Serve history page */
 app.get("/history", (req, res) => {
-  console.log("📚 Serving history page");
   res.sendFile(path.join(__dirname, "public", "history.html"));
+});
+
+/* Health check endpoint for Render deployment */
+app.get("/health", (req, res) => {
+  res.status(200).json({
+    status: "healthy",
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    version: "2.0.0",
+    features: ["transcription", "checkbox-mode", "mindmap-mode", "summary-mode"],
+    environment: process.env.NODE_ENV || "development",
+    port: process.env.PORT || 10000
+  });
 });
 
 /* Test transcription API endpoint */

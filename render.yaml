@@ -1,10 +1,10 @@
 services:
   - type: web
-    name: smart-classroom-transcription
+    name: smart-classroom-v2
     env: node
     plan: starter
     buildCommand: npm install
-    startCommand: node index.js
+    startCommand: npm start
     envVars:
       - key: NODE_ENV
         value: production
@@ -13,7 +13,15 @@ services:
       - key: ELEVENLABS_KEY
         sync: false
       - key: ANTHROPIC_KEY
+        sync: false  
+      - key: ANTHROPIC_API_KEY
         sync: false
-    healthCheckPath: /admin
+      - key: MONGODB_URI
+        sync: false
+    healthCheckPath: /health
     autoDeploy: true
-    nodeVersion: 18.20.5 
+    nodeVersion: 18
+    # Uncomment for production scaling (requires Standard plan or higher)
+    # scaling:
+    #   minInstances: 1
+    #   maxInstances: 3 
