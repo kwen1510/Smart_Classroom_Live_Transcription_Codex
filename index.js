@@ -1925,7 +1925,7 @@ async function summarise(text, customPrompt) {
     const basePrompt = customPrompt || "Summarise the following classroom discussion in ≤6 clear bullet points:";
     
   const body = {
-      model: "claude-3-haiku-20240307",
+      model: "claude-sonnet-4-20250514",
       max_tokens: 256,
       temperature: 0.2,
     messages: [
@@ -1996,7 +1996,7 @@ Respond with JSON in this exact format:
 Levels: 1=main topic, 2=subtopic, 3=sub-subtopic/example`;
 
     const body = {
-      model: "claude-3-haiku-20240307",
+      model: "claude-sonnet-4-20250514",
       max_tokens: 300,
       temperature: 0.3,
       messages: [
@@ -2108,7 +2108,7 @@ Extract the most relevant quote from the transcript for each match.
 RESPOND WITH ONLY JSON, NO OTHER TEXT.`;
 
     const body = {
-      model: "claude-3-haiku-20240307",
+      model: "claude-sonnet-4-20250514",
       max_tokens: 800,
       temperature: 0.1,
       messages: [
