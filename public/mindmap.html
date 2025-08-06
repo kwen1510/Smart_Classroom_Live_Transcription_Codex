@@ -450,6 +450,13 @@
     </div>
 
     <script>
+        // Dynamic API base URL - works in both development and production
+        const API_BASE_URL = window.location.hostname === 'localhost' ? 
+            'http://localhost:10000' : 
+            `${window.location.protocol}//${window.location.host}`;
+        
+        console.log('🌐 API Base URL:', API_BASE_URL);
+        
         let currentSession = null;
         let currentMindmapData = null;
         let chatHistory = [];
@@ -639,7 +646,7 @@
                     const controller = new AbortController();
                     const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
                     
-                    const response = await fetch('http://localhost:10000/api/transcribe-mindmap-chunk', {
+                    const response = await fetch(`${API_BASE_URL}/api/transcribe-mindmap-chunk`, {
                         method: 'POST',
                         body: formData,
                         signal: controller.signal
@@ -772,7 +779,7 @@
 
         async function createMindmapSession(mainTopic) {
             const sessionCode = 'MINDMAP-' + Math.floor(Math.random() * 10000);
-            const sessionResponse = await fetch('http://localhost:10000/api/mindmap/session', {
+            const sessionResponse = await fetch(`${API_BASE_URL}/api/mindmap/session`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ 
@@ -900,7 +907,7 @@
                 };
 
                 // Save to backend database
-                const saveResponse = await fetch('http://localhost:10000/api/mindmap/save', {
+                const saveResponse = await fetch(`${API_BASE_URL}/api/mindmap/save`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(sessionMetadata)
@@ -999,7 +1006,7 @@
 
                 // If this is the first speech input, generate initial mindmap
                 if (!currentMindmapData || currentMindmapData.children.length === 0) {
-                    response = await fetch('http://localhost:10000/api/mindmap/generate', {
+                    response = await fetch(`${API_BASE_URL}/api/mindmap/generate`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ 
@@ -1009,7 +1016,7 @@
                     });
                 } else {
                     // Expand existing mindmap
-                    response = await fetch('http://localhost:10000/api/mindmap/expand', {
+                    response = await fetch(`${API_BASE_URL}/api/mindmap/expand`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ 
@@ -1171,7 +1178,7 @@ The behavioral patterns of cats are equally impressive. They spend approximately
 
                 // Create session
                 const sessionCode = 'MINDMAP-' + Math.floor(Math.random() * 10000);
-                const sessionResponse = await fetch('http://localhost:10000/api/mindmap/session', {
+                const sessionResponse = await fetch(`${API_BASE_URL}/api/mindmap/session`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ 
@@ -1186,7 +1193,7 @@ The behavioral patterns of cats are equally impressive. They spend approximately
                 }
 
                 // Generate initial mindmap
-                const generateResponse = await fetch('http://localhost:10000/api/mindmap/generate', {
+                const generateResponse = await fetch(`${API_BASE_URL}/api/mindmap/generate`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ 
@@ -1255,7 +1262,7 @@ The behavioral patterns of cats are equally impressive. They spend approximately
                 const thinkingId = addChatMessage('ai', 'Analyzing and updating mindmap...', null, true);
 
                 // Send to API
-                const response = await fetch('http://localhost:10000/api/mindmap/expand', {
+                const response = await fetch(`${API_BASE_URL}/api/mindmap/expand`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ 
