@@ -451,9 +451,13 @@
 
     <script>
         // Dynamic API base URL - works in both development and production
-        const API_BASE_URL = window.location.hostname === 'localhost' ? 
-            'http://localhost:10000' : 
-            `${window.location.protocol}//${window.location.host}`;
+        const API_BASE_URL = (() => {
+            if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+                return 'http://localhost:10000';
+            }
+            // In production, always use HTTPS and current host
+            return `https://${window.location.host}`;
+        })();
         
         console.log('🌐 API Base URL:', API_BASE_URL);
         
