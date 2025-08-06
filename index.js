@@ -84,17 +84,7 @@ async function getMindmapData(sessionCode) {
 }
 
 /* ---------- 1. MongoDB ---------- */
-const uri = `mongodb+srv://${process.env.MONGO_DB_USERNAME}:${process.env.MONGO_DB_PASSWORD}@cluster0.bwtbeur.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
-
-// Create a MongoClient with a MongoClientOptions object to set the Stable API version
-const client = new MongoClient(uri, {
-  serverApi: {
-    version: ServerApiVersion.v1,
-    strict: true,
-    deprecationErrors: true,
-  }
-});
-
+let client;
 let db;
 
 async function connectToDatabase() {
@@ -115,7 +105,15 @@ async function connectToDatabase() {
       uri = `mongodb+srv://${username}:${password}@cluster0.bwtbeur.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
     }
     
-    client = new MongoClient(uri);
+    // Create a MongoClient with a MongoClientOptions object to set the Stable API version
+    client = new MongoClient(uri, {
+      serverApi: {
+        version: ServerApiVersion.v1,
+        strict: true,
+        deprecationErrors: true,
+      }
+    });
+    
     await client.connect();
     db = client.db("smart_classroom");
     
@@ -137,7 +135,7 @@ async function connectToDatabase() {
     
     // Start server after database connection
     const port = process.env.PORT || 10000;
-    server.listen(port, () => {
+    http.listen(port, () => {
       console.log(`🎯 Server running at http://localhost:${port}`);
     });
     
