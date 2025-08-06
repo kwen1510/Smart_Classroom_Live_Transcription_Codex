@@ -3,13 +3,13 @@ services:
     name: smart-classroom-v2
     env: node
     plan: starter
+    region: oregon
     buildCommand: npm install
     startCommand: npm start
+    rootDir: .
     envVars:
       - key: NODE_ENV
         value: production
-      - key: PORT
-        value: 10000
       - key: ELEVENLABS_KEY
         sync: false
       - key: ANTHROPIC_KEY
@@ -20,7 +20,10 @@ services:
         sync: false
     healthCheckPath: /health
     autoDeploy: true
-    nodeVersion: 18
+    disk:
+      name: smart-classroom-disk
+      mountPath: /tmp
+      sizeGB: 1
     # Uncomment for production scaling (requires Standard plan or higher)
     # scaling:
     #   minInstances: 1

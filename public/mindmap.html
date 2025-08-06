@@ -20,17 +20,16 @@
         
         /* D3.js Mindmap Styles */
         .mindmap-container {
-            background: radial-gradient(circle at 50% 50%, #f8fafc 0%, #e2e8f0 100%);
+            background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
             border-radius: 12px;
-            position: relative;
-            overflow: hidden;
+            box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1);
         }
         
         .link {
             fill: none;
-            stroke: #94a3b8;
+            stroke: #cbd5e1;
             stroke-width: 2px;
-            transition: all 0.3s ease;
+            stroke-opacity: 0.8;
         }
         
         .link:hover {
@@ -41,19 +40,22 @@
         .node circle {
             cursor: pointer;
             transition: all 0.3s ease;
-            filter: drop-shadow(0 2px 6px rgba(0,0,0,0.1));
         }
         
-        .node:hover circle {
-            filter: drop-shadow(0 4px 12px rgba(0,0,0,0.2));
-            transform: scale(1.1);
+        .node circle:hover {
+            stroke-width: 3px;
+            filter: brightness(1.1);
         }
         
         .node text {
-            font-family: 'Inter', sans-serif;
-            font-weight: 500;
-            pointer-events: none;
-            text-shadow: 0 1px 2px rgba(255,255,255,0.8);
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            user-select: none;
+            transition: all 0.2s ease;
+        }
+        
+        .text-tooltip {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            line-height: 1.4;
         }
         
         /* Chat Styles */
@@ -330,6 +332,18 @@
                                     <i data-lucide="focus" class="w-4 h-4 mr-2"></i>
                                     Recenter
                                 </button>
+                                
+                                <!-- Help tooltip for text expansion -->
+                                <div class="relative group">
+                                    <button class="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors duration-200 flex items-center text-sm">
+                                        <i data-lucide="help-circle" class="w-4 h-4 mr-2"></i>
+                                        Help
+                                    </button>
+                                    <div class="absolute bottom-full left-0 mb-2 w-64 bg-black text-white text-xs rounded-lg py-2 px-3 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-10">
+                                        <strong>💡 Tip:</strong> Click on any text in the mindmap to see the full content if it's truncated. Hover over text to see it's clickable!
+                                        <div class="absolute top-full left-4 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-black"></div>
+                                    </div>
+                                </div>
                                 <button 
                                     id="toggleChatBtn"
                                     class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center text-sm font-medium"
@@ -1338,6 +1352,54 @@ The behavioral patterns of cats are equally impressive. They spend approximately
             return div.innerHTML.replace(/\n/g, '<br>');
         }
 
+        function showFullText(text, event) {
+            // Remove any existing tooltip
+            d3.selectAll('.text-tooltip').remove();
+            
+            // Create tooltip
+            const tooltip = d3.select('body')
+                .append('div')
+                .attr('class', 'text-tooltip')
+                .style('position', 'absolute')
+                .style('background', 'rgba(0, 0, 0, 0.9)')
+                .style('color', 'white')
+                .style('padding', '12px 16px')
+                .style('border-radius', '8px')
+                .style('font-size', '14px')
+                .style('max-width', '300px')
+                .style('word-wrap', 'break-word')
+                .style('box-shadow', '0 4px 12px rgba(0, 0, 0, 0.3)')
+                .style('z-index', '1000')
+                .style('pointer-events', 'none')
+                .style('opacity', 0)
+                .text(text);
+            
+            // Position tooltip
+            const x = event ? event.pageX : 0;
+            const y = event ? event.pageY : 0;
+            
+            tooltip
+                .style('left', (x + 10) + 'px')
+                .style('top', (y - 10) + 'px')
+                .transition()
+                .duration(200)
+                .style('opacity', 1);
+            
+            // Auto-hide after 5 seconds
+            setTimeout(() => {
+                tooltip.transition()
+                    .duration(300)
+                    .style('opacity', 0)
+                    .remove();
+            }, 5000);
+            
+            // Hide on click anywhere
+            d3.select('body').on('click.tooltip', function() {
+                tooltip.remove();
+                d3.select('body').on('click.tooltip', null);
+            });
+        }
+
         function renderMindmap(data) {
             console.log('Rendering mindmap:', data);
             
@@ -1387,16 +1449,21 @@ The behavioral patterns of cats are equally impressive. They spend approximately
                     .x(d => d.y + 100)
                     .y(d => d.x));
 
-            // Create nodes
+            // Create nodes with entrance animation
             const node = g.selectAll('.node')
                 .data(root.descendants())
                 .enter().append('g')
                 .attr('class', 'node')
-                .attr('transform', d => `translate(${d.y + 100},${d.x})`);
+                .attr('transform', d => `translate(${d.y + 100},${d.x})`)
+                .style('opacity', 0)
+                .transition()
+                .duration(500)
+                .delay((d, i) => i * 50)
+                .style('opacity', 1);
 
             // Add circles to nodes
             node.append('circle')
-                .attr('r', d => d.children ? 8 : 6)
+                .attr('r', 0)
                 .style('fill', d => {
                     if (d.depth === 0) return '#667eea'; // Root - blue
                     if (d.depth === 1) return '#10b981'; // Main topics - green
@@ -1404,13 +1471,19 @@ The behavioral patterns of cats are equally impressive. They spend approximately
                     return '#ef4444'; // Deep details - red
                 })
                 .style('stroke', '#fff')
-                .style('stroke-width', 2);
+                .style('stroke-width', 2)
+                .transition()
+                .duration(300)
+                .delay((d, i) => i * 50 + 200)
+                .attr('r', d => d.children ? 8 : 6);
 
-            // Add text labels with wrapping
+            // Add text labels with better wrapping
             node.each(function(d) {
                 const nodeGroup = d3.select(this);
-                const words = d.data.name.split(' ');
-                const maxCharsPerLine = d.children ? 20 : 25;
+                const text = d.data.name;
+                const words = text.split(' ');
+                const maxCharsPerLine = d.children ? 25 : 30; // Increased character limits
+                const maxLines = d.children ? 3 : 4; // Allow more lines
                 const lines = [];
                 let currentLine = '';
 
@@ -1424,21 +1497,58 @@ The behavioral patterns of cats are equally impressive. They spend approximately
                 });
                 if (currentLine) lines.push(currentLine);
 
-                // Limit to 2 lines
-                const displayLines = lines.slice(0, 2);
-                if (lines.length > 2) {
-                    displayLines[1] = displayLines[1].slice(0, -3) + '...';
+                // Show more lines, only truncate if really necessary
+                const displayLines = lines.slice(0, maxLines);
+                if (lines.length > maxLines) {
+                    // Only add ellipsis if we're actually cutting off content
+                    const lastLine = displayLines[maxLines - 1];
+                    displayLines[maxLines - 1] = lastLine.length > 20 ? 
+                        lastLine.slice(0, -3) + '...' : lastLine + '...';
                 }
 
                 displayLines.forEach((line, i) => {
-                    nodeGroup.append('text')
-                        .attr('dy', d.children ? -20 + (i * 12) : 3 + (i * 12))
-                        .attr('x', d.children ? 0 : 12)
+                    const textElement = nodeGroup.append('text')
+                        .attr('dy', d.children ? -25 + (i * 14) : 5 + (i * 14)) // More spacing between lines
+                        .attr('x', d.children ? 0 : 15)
                         .attr('text-anchor', d.children ? 'middle' : 'start')
-                        .style('font-size', d.children ? '12px' : '11px')
+                        .style('font-size', d.children ? '13px' : '12px') // Slightly larger font
                         .style('font-weight', d.children ? 'bold' : 'normal')
                         .style('fill', '#1e293b')
+                        .style('cursor', 'pointer')
                         .text(line);
+                    
+                    // Add hover effects and click handler
+                    textElement
+                        .on('mouseover', function() {
+                            d3.select(this)
+                                .style('fill', '#3b82f6')
+                                .style('text-decoration', 'underline');
+                        })
+                        .on('mouseout', function() {
+                            d3.select(this)
+                                .style('fill', '#1e293b')
+                                .style('text-decoration', 'none');
+                        })
+                        .on('click', function(event) {
+                            event.stopPropagation();
+                            showFullText(d.data.name, event);
+                        });
+                    
+                    // Add a small icon indicator if text is truncated
+                    if (lines.length > maxLines && i === displayLines.length - 1) {
+                        nodeGroup.append('text')
+                            .attr('dy', d.children ? -25 + ((i + 1) * 14) : 5 + ((i + 1) * 14))
+                            .attr('x', d.children ? 0 : 15)
+                            .attr('text-anchor', d.children ? 'middle' : 'start')
+                            .style('font-size', '10px')
+                            .style('fill', '#6b7280')
+                            .style('cursor', 'pointer')
+                            .text('(click to expand)')
+                            .on('click', function(event) {
+                                event.stopPropagation();
+                                showFullText(d.data.name, event);
+                            });
+                    }
                 });
             });
 
