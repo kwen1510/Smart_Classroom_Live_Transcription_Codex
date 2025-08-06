@@ -4,7 +4,18 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Smart Classroom - AI Mindmap Mode</title>
+    <!-- Use Tailwind CDN for development, but this should be replaced with a build process in production -->
     <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        // Suppress Tailwind production warning
+        if (typeof tailwind !== 'undefined') {
+            tailwind.config = {
+                corePlugins: {
+                    preflight: false,
+                }
+            }
+        }
+    </script>
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
     <script src="https://d3js.org/d3.v7.min.js"></script>
     <style>
@@ -1460,17 +1471,12 @@ The behavioral patterns of cats are equally impressive. They spend approximately
                     .x(d => d.y + 100)
                     .y(d => d.x));
 
-            // Create nodes with entrance animation
+            // Create nodes (without animation first)
             const node = g.selectAll('.node')
                 .data(root.descendants())
                 .enter().append('g')
                 .attr('class', 'node')
-                .attr('transform', d => `translate(${d.y + 100},${d.x})`)
-                .style('opacity', 0)
-                .transition()
-                .duration(500)
-                .delay((d, i) => i * 50)
-                .style('opacity', 1);
+                .attr('transform', d => `translate(${d.y + 100},${d.x})`);
 
             // Add circles to nodes
             node.append('circle')
@@ -1482,11 +1488,7 @@ The behavioral patterns of cats are equally impressive. They spend approximately
                     return '#ef4444'; // Deep details - red
                 })
                 .style('stroke', '#fff')
-                .style('stroke-width', 2)
-                .transition()
-                .duration(300)
-                .delay((d, i) => i * 50 + 200)
-                .attr('r', d => d.children ? 8 : 6);
+                .style('stroke-width', 2);
 
             // Add text labels with better wrapping
             node.each(function(d) {
@@ -1562,6 +1564,21 @@ The behavioral patterns of cats are equally impressive. They spend approximately
                     }
                 });
             });
+
+            // Now apply entrance animations
+            node
+                .style('opacity', 0)
+                .transition()
+                .duration(500)
+                .delay((d, i) => i * 50)
+                .style('opacity', 1);
+
+            // Animate circles
+            node.select('circle')
+                .transition()
+                .duration(300)
+                .delay((d, i) => i * 50 + 200)
+                .attr('r', d => d.children ? 8 : 6);
 
             // Center the visualization
             try {
