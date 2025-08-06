@@ -24,6 +24,65 @@ const elevenlabs = new ElevenLabsClient({
 const activeSessions = new Map(); // sessionCode -> { id, code, active, interval, startTime }
 const sessionTimers = new Map();  // sessionCode -> timer
 
+// Global storage for session transcript history
+const sessionTranscriptHistory = new Map();
+
+// Helper function to manage transcript history
+function addToTranscriptHistory(sessionCode, transcript) {
+  if (!sessionTranscriptHistory.has(sessionCode)) {
+    sessionTranscriptHistory.set(sessionCode, []);
+  }
+  
+  const history = sessionTranscriptHistory.get(sessionCode);
+  history.push({
+    transcript: transcript,
+    timestamp: new Date().toISOString()
+  });
+  
+  // Keep only the last 3 chunks for context
+  if (history.length > 3) {
+    history.shift();
+  }
+  
+  console.log(`📝 Context History: Session ${sessionCode} now has ${history.length} chunks`);
+}
+
+function getContextualTranscript(sessionCode) {
+  const history = sessionTranscriptHistory.get(sessionCode) || [];
+  if (history.length === 0) return '';
+  
+  // Return combined transcript with context markers
+  const contextText = history.map((chunk, index) => {
+    const isLatest = index === history.length - 1;
+    const chunkLabel = isLatest ? 'CURRENT CHUNK' : `PREVIOUS CHUNK ${history.length - index - 1}`;
+    return `[${chunkLabel}]: ${chunk.transcript}`;
+  }).join('\n\n');
+  
+  console.log(`🧠 Context Window: Sending ${history.length} chunks for analysis`);
+  return contextText;
+}
+
+function clearTranscriptHistory(sessionCode) {
+  sessionTranscriptHistory.delete(sessionCode);
+  console.log(`🗑️ Cleared transcript history for session: ${sessionCode}`);
+}
+
+// Helper function to get current mindmap data from database
+async function getMindmapData(sessionCode) {
+  try {
+    const session = await db.collection("sessions").findOne({ code: sessionCode });
+    if (!session) {
+      console.log(`⚠️ Session ${sessionCode} not found for mindmap data retrieval`);
+      return null;
+    }
+    
+    return session.mindmap_data || null;
+  } catch (error) {
+    console.error(`❌ Error retrieving mindmap data for session ${sessionCode}:`, error);
+    return null;
+  }
+}
+
 /* ---------- 1. MongoDB ---------- */
 const uri = `mongodb+srv://${process.env.MONGO_DB_USERNAME}:${process.env.MONGO_DB_PASSWORD}@cluster0.bwtbeur.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
 
@@ -40,35 +99,50 @@ let db;
 
 async function connectToDatabase() {
   try {
-    // Connect the client to the server
+    console.log('📦 Connecting to MongoDB...');
+    
+    // Use MONGODB_URI if provided (for Render deployment), otherwise fall back to individual components
+    let uri;
+    if (process.env.MONGODB_URI) {
+      uri = process.env.MONGODB_URI;
+    } else {
+      // Fallback to individual components for local development
+      const username = process.env.MONGO_DB_USERNAME || 'admin';
+      const password = process.env.MONGO_DB_PASSWORD;
+      if (!password) {
+        throw new Error('MongoDB password not provided. Set MONGODB_URI or MONGO_DB_PASSWORD environment variable.');
+      }
+      uri = `mongodb+srv://${username}:${password}@cluster0.bwtbeur.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
+    }
+    
+    client = new MongoClient(uri);
     await client.connect();
-    db = client.db("SMART_CLASSROOM_LIVE_SUMMARY");
-    console.log("📦 MongoDB connected");
+    db = client.db("smart_classroom");
+    
+    console.log('📦 MongoDB connected');
     
     // Create indexes for better performance
-    await db.collection("sessions").createIndex({ "code": 1 }, { unique: true });
-    await db.collection("groups").createIndex({ "session_id": 1, "number": 1 }, { unique: true });
-    await db.collection("transcripts").createIndex({ "group_id": 1, "created_at": 1 });
-    await db.collection("transcripts").createIndex({ "group_id": 1, "segment_number": 1 });
-    await db.collection("summaries").createIndex({ "group_id": 1 }, { unique: true });
-    await db.collection("session_prompts").createIndex({ "session_id": 1 }, { unique: true });
-    await db.collection("prompt_library").createIndex({ name: 1 });
-    
-    // New indexes for mindmap and checkbox modes
-    await db.collection("mindmap_sessions").createIndex({ "session_id": 1 }, { unique: true });
-    await db.collection("mindmap_nodes").createIndex({ "session_id": 1, "created_at": 1 });
-    await db.collection("checkbox_sessions").createIndex({ "session_id": 1 }, { unique: true });
+    await db.collection("sessions").createIndex({ "code": 1 });
+    await db.collection("sessions").createIndex({ "active": 1 });
+    await db.collection("groups").createIndex({ "session_id": 1, "number": 1 });
+    await db.collection("transcriptions").createIndex({ "group_id": 1, "timestamp": 1 });
+    await db.collection("summaries").createIndex({ "group_id": 1, "timestamp": 1 });
+    await db.collection("checkbox_sessions").createIndex({ "session_id": 1 });
     await db.collection("checkbox_criteria").createIndex({ "session_id": 1 });
-    await db.collection("checkbox_progress").createIndex({ "session_id": 1, "criteria_id": 1 });
-    await db.collection("session_logs").createIndex({ "session_id": 1, "created_at": 1 });
+    await db.collection("checkbox_results").createIndex({ "session_id": 1, "timestamp": 1 });
+    await db.collection("mindmap_archives").createIndex({ "session_id": 1, "saved_at": 1 });
+    await db.collection("mindmap_archives").createIndex({ "session_code": 1 });
     
-    console.log("📊 Database indexes ready");
-
-    // Start server ONLY after DB is ready!
-    const port = process.env.PORT || 8080;
-    http.listen(port, () => console.log(`🎯 Server running at http://localhost:${port}`));
+    console.log('📊 Database indexes ready');
+    
+    // Start server after database connection
+    const port = process.env.PORT || 10000;
+    server.listen(port, () => {
+      console.log(`🎯 Server running at http://localhost:${port}`);
+    });
+    
   } catch (error) {
-    console.error("❌ Failed to connect to MongoDB:", error);
+    console.error('❌ MongoDB connection failed:', error);
     process.exit(1);
   }
 }
@@ -870,6 +944,7 @@ app.post("/api/mindmap/session", express.json(), async (req, res) => {
           _id: sessionId,
           code: sessionCode,
           mode: "mindmap",
+          main_topic: mainTopic,
           interval_ms: interval,
           created_at: now,
           active: true,
@@ -880,26 +955,21 @@ app.post("/api/mindmap/session", express.json(), async (req, res) => {
       { upsert: true }
     );
     
-    // Create mindmap session record
-    await db.collection("mindmap_sessions").insertOne({
-      _id: uuid(),
-      session_id: sessionId,
-      main_topic: mainTopic,
-      created_at: now
-    });
-    
-    // Create the root node
-    const rootNodeId = uuid();
-    await db.collection("mindmap_nodes").insertOne({
-      _id: rootNodeId,
-      session_id: sessionId,
-      content: mainTopic,
-      level: 0,
-      parent_id: null,
-      created_at: now,
-      x: 0,
-      y: 0
-    });
+    // Create mindmap session record with hierarchical structure
+    await db.collection("mindmap_sessions").findOneAndUpdate(
+      { session_id: sessionId },
+      {
+        $set: {
+          _id: uuid(),
+          session_id: sessionId,
+          main_topic: mainTopic,
+          current_mindmap: null, // Will store hierarchical data
+          chat_history: [],
+          created_at: now
+        }
+      },
+      { upsert: true }
+    );
     
     // Add to active sessions
     activeSessions.set(sessionCode, {
@@ -916,7 +986,6 @@ app.post("/api/mindmap/session", express.json(), async (req, res) => {
     res.json({ 
       success: true, 
       sessionId,
-      rootNodeId,
       message: "Mindmap session created successfully" 
     });
     
@@ -926,7 +995,127 @@ app.post("/api/mindmap/session", express.json(), async (req, res) => {
   }
 });
 
-/* Process transcript for mindmap */
+/* Generate initial mindmap from text */
+app.post("/api/mindmap/generate", express.json(), async (req, res) => {
+  try {
+    const { sessionCode, text } = req.body;
+    
+    if (!sessionCode || !text) {
+      return res.status(400).json({ error: "Session code and text required" });
+    }
+    
+    console.log(`🧠 Generating initial mindmap for session: ${sessionCode}`);
+    
+    // Get session info
+    const session = await db.collection("sessions").findOne({ code: sessionCode, mode: "mindmap" });
+    if (!session) {
+      return res.status(404).json({ error: "Mindmap session not found" });
+    }
+    
+    // Generate mindmap using AI
+    const mindmapData = await generateInitialMindmap(text, session.main_topic);
+    
+    // Store the generated mindmap
+    await db.collection("mindmap_sessions").updateOne(
+      { session_id: session._id },
+      { 
+        $set: { current_mindmap: mindmapData },
+        $push: { 
+          chat_history: {
+            type: 'user',
+            content: text,
+            timestamp: Date.now()
+          }
+        }
+      }
+    );
+    
+    // Log the processing
+    await db.collection("session_logs").insertOne({
+      _id: uuid(),
+      session_id: session._id,
+      type: "mindmap_generated",
+      content: text,
+      ai_response: { action: "generate", data: mindmapData },
+      created_at: Date.now()
+    });
+    
+    res.json({
+      success: true,
+      data: mindmapData,
+      message: "Initial mindmap generated successfully"
+    });
+    
+  } catch (err) {
+    console.error("❌ Failed to generate mindmap:", err);
+    res.status(500).json({ error: "Failed to generate mindmap" });
+  }
+});
+
+/* Expand existing mindmap with new information */
+app.post("/api/mindmap/expand", express.json(), async (req, res) => {
+  try {
+    const { sessionCode, text } = req.body;
+    
+    if (!sessionCode || !text) {
+      return res.status(400).json({ error: "Session code and text required" });
+    }
+    
+    console.log(`🧠 Expanding mindmap for session: ${sessionCode}`);
+    
+    // Get session and current mindmap
+    const session = await db.collection("sessions").findOne({ code: sessionCode, mode: "mindmap" });
+    if (!session) {
+      return res.status(404).json({ error: "Mindmap session not found" });
+    }
+    
+    const mindmapSession = await db.collection("mindmap_sessions").findOne({ session_id: session._id });
+    if (!mindmapSession || !mindmapSession.current_mindmap) {
+      return res.status(400).json({ error: "No existing mindmap found. Generate initial mindmap first." });
+    }
+    
+    // Expand mindmap using AI
+    const result = await expandMindmap(text, mindmapSession.current_mindmap, session.main_topic);
+    
+    // Store the updated mindmap and chat history
+    await db.collection("mindmap_sessions").updateOne(
+      { session_id: session._id },
+      { 
+        $set: { current_mindmap: result.updatedMindmap },
+        $push: { 
+          chat_history: {
+            type: 'user',
+            content: text,
+            timestamp: Date.now()
+          }
+        }
+      }
+    );
+    
+    // Log the processing
+    await db.collection("session_logs").insertOne({
+      _id: uuid(),
+      session_id: session._id,
+      type: "mindmap_expanded",
+      content: text,
+      ai_response: { action: "expand", explanation: result.explanation, data: result.updatedMindmap },
+      created_at: Date.now()
+    });
+    
+    res.json({
+      success: true,
+      data: result.updatedMindmap,
+      message: result.explanation,
+      rawAiResponse: result.rawResponse // For collapsible display
+    });
+    
+  } catch (err) {
+    console.error("❌ Failed to expand mindmap:", err);
+    res.status(500).json({ error: "Failed to expand mindmap" });
+  }
+});
+
+/* Process transcript for mindmap (for recording mode) */
 app.post("/api/mindmap/process", express.json(), async (req, res) => {
   try {
     const { sessionCode, transcript } = req.body;
@@ -937,68 +1126,64 @@ app.post("/api/mindmap/process", express.json(), async (req, res) => {
     
     console.log(`🧠 Processing transcript for mindmap session: ${sessionCode}`);
     
-    // Get session info
+    // Get session and current mindmap
     const session = await db.collection("sessions").findOne({ code: sessionCode, mode: "mindmap" });
     if (!session) {
       return res.status(404).json({ error: "Mindmap session not found" });
     }
     
-    // Get mindmap session details
     const mindmapSession = await db.collection("mindmap_sessions").findOne({ session_id: session._id });
     if (!mindmapSession) {
       return res.status(404).json({ error: "Mindmap session details not found" });
     }
     
-    // Get existing nodes
-    const existingNodes = await db.collection("mindmap_nodes")
-      .find({ session_id: session._id })
-      .sort({ created_at: 1 })
-      .toArray();
+    let result;
     
-    // Process the transcript
-    const result = await processMindmapTranscript(transcript, mindmapSession.main_topic, existingNodes);
+    // If no current mindmap, generate initial one
+    if (!mindmapSession.current_mindmap) {
+      console.log(`🧠 No existing mindmap, generating initial one...`);
+      const mindmapData = await generateInitialMindmap(transcript, session.main_topic);
+      
+      await db.collection("mindmap_sessions").updateOne(
+        { session_id: session._id },
+        { $set: { current_mindmap: mindmapData }}
+      );
+      
+      result = {
+        success: true,
+        action: "generate",
+        data: mindmapData,
+        message: "Initial mindmap generated from transcript"
+      };
+    } else {
+      // Expand existing mindmap
+      console.log(`🧠 Expanding existing mindmap...`);
+      const expansion = await expandMindmap(transcript, mindmapSession.current_mindmap, session.main_topic);
+      
+      await db.collection("mindmap_sessions").updateOne(
+        { session_id: session._id },
+        { $set: { current_mindmap: expansion.updatedMindmap }}
+      );
+      
+      result = {
+        success: true,
+        action: "expand", 
+        data: expansion.updatedMindmap,
+        message: expansion.explanation
+      };
+    }
     
-    // Log the processing result
+    // Log the processing
     await db.collection("session_logs").insertOne({
       _id: uuid(),
       session_id: session._id,
-      type: result.action === "ignore" ? "ignored_chatter" : "processed_content",
+      type: result.action === "generate" ? "transcript_generated" : "transcript_expanded",
       content: transcript,
       ai_response: result,
       created_at: Date.now()
     });
     
-    let newNode = null;
-    
-    // If we should add a node, add it to the database
-    if (result.action === "add_node" && result.node) {
-      const nodeId = uuid();
-      
-      // Calculate position (simple layout for now)
-      const nodeCount = existingNodes.length;
-      const angle = (nodeCount * 60) * (Math.PI / 180); // 60 degrees apart
-      const radius = 150 + (result.node.level * 100); // Increase radius by level
-      
-      newNode = {
-        _id: nodeId,
-        session_id: session._id,
-        content: result.node.content,
-        level: result.node.level,
-        parent_id: result.node.parent_id,
-        created_at: Date.now(),
-        x: Math.cos(angle) * radius,
-        y: Math.sin(angle) * radius
-      };
-      
-      await db.collection("mindmap_nodes").insertOne(newNode);
-    }
-    
-    res.json({
-      success: true,
-      action: result.action,
-      reason: result.reason,
-      newNode: newNode
-    });
+    res.json(result);
     
   } catch (err) {
     console.error("❌ Failed to process mindmap transcript:", err);
@@ -1015,34 +1200,27 @@ app.get("/api/mindmap/:sessionCode", async (req, res) => {
     
     // Get session info
     const session = await db.collection("sessions").findOne({ code: sessionCode, mode: "mindmap" });
-      if (!session) {
+    if (!session) {
       return res.status(404).json({ error: "Mindmap session not found" });
     }
-    
+
     // Get mindmap session details
     const mindmapSession = await db.collection("mindmap_sessions").findOne({ session_id: session._id });
-    
-    // Get all nodes
-    const nodes = await db.collection("mindmap_nodes")
+    if (!mindmapSession) {
+      return res.status(404).json({ error: "Mindmap session details not found" });
+    }
+
+    // Get session logs
+    const logs = await db.collection("session_logs")
       .find({ session_id: session._id })
       .sort({ created_at: 1 })
       .toArray();
-    
-    // Get recent logs
-    const logs = await db.collection("session_logs")
-      .find({ session_id: session._id })
-      .sort({ created_at: -1 })
-      .limit(50)
-      .toArray();
-    
+
     res.json({
       success: true,
-      session: {
-        code: sessionCode,
-        mainTopic: mindmapSession?.main_topic,
-        createdAt: session.created_at
-      },
-      nodes: nodes,
+      data: mindmapSession.current_mindmap,
+      mainTopic: mindmapSession.main_topic,
+      chatHistory: mindmapSession.chat_history || [],
       logs: logs
     });
     
@@ -1051,6 +1229,416 @@ app.get("/api/mindmap/:sessionCode", async (req, res) => {
     res.status(500).json({ error: "Failed to fetch mindmap data" });
   }
 });
+
+/* Save mindmap session with metadata */
+app.post("/api/mindmap/save", express.json(), async (req, res) => {
+  try {
+    const { sessionCode, mainTopic, startTime, endTime, duration, durationFormatted, 
+            nodeCount, speechInputs, mindmapData, chatHistory, version, savedAt } = req.body;
+    
+    if (!sessionCode || !mainTopic || !mindmapData) {
+      return res.status(400).json({ error: "Session code, main topic, and mindmap data required" });
+    }
+    
+    console.log(`🧠 Saving mindmap session: ${sessionCode} with metadata`);
+    
+    // Get session info
+    const session = await db.collection("sessions").findOne({ code: sessionCode, mode: "mindmap" });
+    if (!session) {
+      return res.status(404).json({ error: "Mindmap session not found" });
+    }
+
+    // Create comprehensive session archive
+    const sessionArchive = {
+      _id: uuid(),
+      session_id: session._id,
+      session_code: sessionCode,
+      main_topic: mainTopic,
+      start_time: new Date(startTime),
+      end_time: new Date(endTime),
+      duration_seconds: duration,
+      duration_formatted: durationFormatted,
+      node_count: nodeCount,
+      speech_inputs: speechInputs,
+      mindmap_data: mindmapData,
+      chat_history: chatHistory || [],
+      version: version || "1.0",
+      saved_at: new Date(savedAt),
+      created_at: Date.now()
+    };
+
+    // Save to archived sessions collection
+    await db.collection("mindmap_archives").insertOne(sessionArchive);
+
+    // Update the main session with final metadata
+    await db.collection("sessions").updateOne(
+      { _id: session._id },
+      { 
+        $set: { 
+          end_time: Date.now(),
+          archived: true,
+          final_node_count: nodeCount,
+          final_duration: duration
+        }
+      }
+    );
+
+    // Update mindmap session with final data
+    await db.collection("mindmap_sessions").updateOne(
+      { session_id: session._id },
+      { 
+        $set: { 
+          current_mindmap: mindmapData,
+          chat_history: chatHistory || [],
+          archived_at: Date.now(),
+          final_metadata: {
+            duration: duration,
+            nodeCount: nodeCount,
+            speechInputs: speechInputs
+          }
+        }
+      }
+    );
+
+    res.json({
+      success: true,
+      archiveId: sessionArchive._id,
+      message: "Session saved successfully with metadata"
+    });
+    
+  } catch (err) {
+    console.error("❌ Failed to save mindmap session:", err);
+    res.status(500).json({ error: "Failed to save mindmap session" });
+  }
+});
+
+// AI Functions for hierarchical mindmap processing
+async function generateInitialMindmap(contextualText, mainTopic) {
+  try {
+    console.log(`🧠 Mind-Map Maestro: Generating initial academic mindmap for topic: "${mainTopic}"`);
+    
+    const prompt = `You are **Mind-Map Maestro**, an expert cognitive cartographer who turns noisy classroom transcripts into precise, multilevel mind-maps.
+
+RULES – Follow them exactly:
+1. **Noise filter** – Skip filler words, greetings, jokes, tangents, repetitions, false starts, teacher directions, background noise descriptions, and anything that does not advance the topic "${mainTopic}". Expect ~50% of text to be noise.
+
+2. **Signal detection** – Keep high-value content words (nouns, verbs, adjectives) related to "${mainTopic}". Preserve exact wording for technical terms and proper nouns; paraphrase utilities as needed.
+
+3. **Context awareness** – You may receive multiple chunks of transcript with labels like [CURRENT CHUNK] and [PREVIOUS CHUNK]. Use ALL chunks for context, but focus primarily on extracting academic content from the CURRENT CHUNK while using previous chunks for understanding continuity.
+
+4. **Hierarchy** – Classify each new idea as:
+   • \`main\`    (direct point supporting "${mainTopic}")
+   • \`sub\`     (detail under a main point)  
+   • \`example\` (concrete illustration, anecdote, data)
+   Depth must not exceed 3 levels.
+
+5. **Output strictly JSON** – No markdown, comments, or extra text—only a valid JSON object.
+
+6. **Topic preservation** – The root topic MUST be exactly "${mainTopic}". Never change this.
+
+TOPIC: ${mainTopic}
+
+CONTEXTUAL TRANSCRIPT:
+<<<
+${contextualText}
+>>>
+
+If the transcript contains NO meaningful academic content related to "${mainTopic}" (only noise/filler), return:
+{"topic": "${mainTopic}", "version": "${new Date().toISOString()}", "nodes": [], "message": "No academic content detected"}
+
+Otherwise, create a structured mindmap:
+{
+  "topic": "${mainTopic}",
+  "version": "${new Date().toISOString()}",
+  "nodes": [
+    {
+      "id": "uuid-here",
+      "parent_id": null,
+      "label": "Main concept related to ${mainTopic}",
+      "type": "main"
+    },
+    {
+      "id": "uuid-here", 
+      "parent_id": "parent-uuid",
+      "label": "Supporting detail",
+      "type": "sub"
+    },
+    {
+      "id": "uuid-here",
+      "parent_id": "parent-uuid", 
+      "label": "Specific example",
+      "type": "example"
+    }
+  ]
+}
+
+Generate proper UUIDs for each node. Return ONLY the JSON object.`;
+
+    const body = {
+      model: "claude-3-5-sonnet-20241022",
+      max_tokens: 2048,
+      temperature: 0.1, // Very low for consistent structure
+      messages: [{
+        role: "user",
+        content: prompt
+      }]
+    };
+
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "x-api-key": process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_KEY,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json"
+      },
+      body: JSON.stringify(body)
+    });
+
+    if (!res.ok) {
+      console.error(`❌ Mind-Map Maestro API error: ${res.status} ${res.statusText}`);
+      throw new Error("AI API error");
+    }
+
+    const response = await res.json();
+    const responseText = response.content[0].text;
+    
+    // Try to parse JSON
+    try {
+      const result = JSON.parse(responseText);
+      
+      // Check if no academic content was found
+      if (result.nodes && result.nodes.length === 0) {
+        console.log("⚠️ Mind-Map Maestro: No meaningful academic content detected");
+        return null;
+      }
+      
+      // Convert to our existing format for compatibility
+      const convertedResult = convertMaestroToLegacy(result, mainTopic);
+      return convertedResult;
+      
+    } catch (parseError) {
+      // Try to extract JSON from response
+      const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const result = JSON.parse(jsonMatch[0]);
+        if (result.nodes && result.nodes.length === 0) {
+          return null;
+        }
+        const convertedResult = convertMaestroToLegacy(result, mainTopic);
+        return convertedResult;
+      }
+      throw new Error('Could not parse mindmap data from Mind-Map Maestro');
+    }
+    
+  } catch (error) {
+    console.error("❌ Failed to generate Mind-Map Maestro mindmap:", error);
+    throw error;
+  }
+}
+
+// Convert Mind-Map Maestro format to our legacy hierarchical format
+function convertMaestroToLegacy(maestroData, mainTopic) {
+  const legacy = {
+    name: mainTopic,
+    children: []
+  };
+  
+  // Group nodes by parent_id
+  const nodeMap = {};
+  const rootNodes = [];
+  
+  maestroData.nodes.forEach(node => {
+    nodeMap[node.id] = {
+      name: node.label,
+      children: [],
+      type: node.type,
+      id: node.id
+    };
+    
+    if (node.parent_id === null) {
+      rootNodes.push(nodeMap[node.id]);
+    }
+  });
+  
+  // Build hierarchy
+  maestroData.nodes.forEach(node => {
+    if (node.parent_id !== null && nodeMap[node.parent_id]) {
+      nodeMap[node.parent_id].children.push(nodeMap[node.id]);
+    }
+  });
+  
+  // Add root nodes as children of main topic
+  legacy.children = rootNodes;
+  
+  console.log(`✅ Mind-Map Maestro: Converted ${maestroData.nodes.length} nodes to legacy format`);
+  return legacy;
+}
+
+async function expandMindmap(contextualText, currentMindmap, mainTopic) {
+  try {
+    console.log(`🧠 Mind-Map Maestro: Analyzing contextual content for mindmap expansion of topic: "${mainTopic}"`);
+    
+    // Convert current mindmap to Maestro format for processing
+    const currentMaestroFormat = convertLegacyToMaestro(currentMindmap, mainTopic);
+    
+    const prompt = `You are **Mind-Map Maestro**, an expert cognitive cartographer who turns noisy classroom transcripts into precise, multilevel mind-maps.
+
+RULES – Follow them exactly:
+1. **Noise filter** – Skip filler words, greetings, jokes, tangents, repetitions, false starts, teacher directions, background noise descriptions, and anything that does not advance the topic "${mainTopic}". Expect ~50% of text to be noise.
+
+2. **Signal detection** – Keep high-value content words (nouns, verbs, adjectives) related to "${mainTopic}". Preserve exact wording for technical terms and proper nouns; paraphrase utilities as needed.
+
+3. **Context awareness** – You will receive multiple chunks of transcript with labels like [CURRENT CHUNK] and [PREVIOUS CHUNK]. Use ALL chunks for context and continuity, but focus primarily on extracting NEW academic content from the CURRENT CHUNK.
+
+4. **Hierarchy** – Classify each new idea as:
+   • \`main\`    (direct point supporting "${mainTopic}")
+   • \`sub\`     (detail under a main point)  
+   • \`example\` (concrete illustration, anecdote, data)
+   Depth must not exceed 3 levels.
+
+5. **Incremental build** – CRITICAL: Never delete or modify existing nodes; only append NEW nodes. The existing mindmap represents previous conversation context. Build upon it naturally, don't disrupt it. Avoid duplicates by checking against existing content.
+
+6. **Output strictly JSON** – No markdown, comments, or extra text—only a valid JSON object.
+
+7. **Topic preservation** – The root topic MUST remain exactly "${mainTopic}".
+
+TOPIC: ${mainTopic}
+
+CURRENT MINDMAP:
+<<<
+${JSON.stringify(currentMaestroFormat, null, 2)}
+>>>
+
+CONTEXTUAL TRANSCRIPT:
+<<<
+${contextualText}
+>>>
+
+Task: Using the contextual transcript (focusing on CURRENT CHUNK), append ONLY NEW nodes that build upon the existing mindmap. If the current chunk contains no NEW meaningful academic content related to "${mainTopic}", return the unchanged mindmap with action "ignore".
+
+IMPORTANT: Preserve ALL existing nodes. Only ADD new ones that represent genuinely new information not already covered.
+
+Return format:
+{
+  "action": "ignore|expand",
+  "topic": "${mainTopic}",
+  "version": "${new Date().toISOString()}",
+  "nodes": [/* ALL existing nodes PLUS any new ones */],
+  "explanation": "Brief explanation of what was added or why ignored"
+}
+
+Generate proper UUIDs for any new nodes. Return ONLY the JSON object.`;
+
+    const body = {
+      model: "claude-3-5-sonnet-20241022",
+      max_tokens: 2048,
+      temperature: 0.1, // Very low for consistent structure
+      messages: [{
+        role: "user",
+        content: prompt
+      }]
+    };
+
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "x-api-key": process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_KEY,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json"
+      },
+      body: JSON.stringify(body)
+    });
+
+    if (!res.ok) {
+      console.error(`❌ Mind-Map Maestro expansion API error: ${res.status} ${res.statusText}`);
+      throw new Error("AI API error");
+    }
+
+    const response = await res.json();
+    const responseText = response.content[0].text;
+    
+    // Try to parse JSON
+    let result;
+    try {
+      result = JSON.parse(responseText);
+    } catch (parseError) {
+      // Try to extract JSON from response
+      const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        result = JSON.parse(jsonMatch[0]);
+      } else {
+        throw new Error('Could not parse mindmap expansion data from Mind-Map Maestro');
+      }
+    }
+
+    // Handle ignore action
+    if (result.action === "ignore") {
+      console.log("⚠️ Mind-Map Maestro: Content filtered out as non-academic");
+      return {
+        updatedMindmap: currentMindmap, // Return unchanged mindmap
+        explanation: result.explanation || 'Content filtered out: no academic value',
+        rawResponse: responseText,
+        filtered: true
+      };
+    }
+
+    // Convert result back to legacy format
+    const updatedLegacyFormat = convertMaestroToLegacy(result, mainTopic);
+
+    console.log(`✅ Mind-Map Maestro: Expansion processed with ${result.nodes.length} total nodes`);
+
+    return {
+      updatedMindmap: updatedLegacyFormat,
+      explanation: result.explanation || 'Academic mindmap updated successfully',
+      rawResponse: responseText,
+      filtered: false
+    };
+    
+  } catch (error) {
+    console.error("❌ Failed to expand Mind-Map Maestro mindmap:", error);
+    throw error;
+  }
+}
+
+// Convert legacy hierarchical format to Mind-Map Maestro format
+function convertLegacyToMaestro(legacyData, mainTopic) {
+  const maestro = {
+    topic: mainTopic,
+    version: new Date().toISOString(),
+    nodes: []
+  };
+  
+  let nodeCounter = 0;
+  
+  function addNode(node, parentId = null, depth = 0) {
+    const nodeId = `node-${nodeCounter++}`;
+    let nodeType = 'main';
+    
+    if (depth === 1) nodeType = 'main';
+    else if (depth === 2) nodeType = 'sub';
+    else if (depth >= 3) nodeType = 'example';
+    
+    // Don't add the root node itself, only its children
+    if (node.name !== mainTopic) {
+      maestro.nodes.push({
+        id: nodeId,
+        parent_id: parentId,
+        label: node.name,
+        type: nodeType
+      });
+    }
+    
+    // Process children
+    if (node.children && node.children.length > 0) {
+      node.children.forEach(child => {
+        addNode(child, node.name === mainTopic ? null : nodeId, depth + 1);
+      });
+    }
+  }
+  
+  addNode(legacyData);
+  return maestro;
+}
 
 /* ---------- Checkbox Mode API Endpoints ---------- */
 
@@ -1144,8 +1732,8 @@ app.post("/api/checkbox/session", express.json(), async (req, res) => {
       persisted: true
     });
     
-    res.json({ 
-      success: true, 
+    res.json({
+      success: true,
       sessionId: session._id,
       criteriaIds,
       message: "Checkbox session created successfully" 
@@ -1925,7 +2513,7 @@ async function summarise(text, customPrompt) {
     const basePrompt = customPrompt || "Summarise the following classroom discussion in ≤6 clear bullet points:";
     
   const body = {
-      model: "claude-sonnet-4-20250514",
+      model: "claude-3-haiku-20240307",
       max_tokens: 256,
       temperature: 0.2,
     messages: [
@@ -1996,7 +2584,7 @@ Respond with JSON in this exact format:
 Levels: 1=main topic, 2=subtopic, 3=sub-subtopic/example`;
 
     const body = {
-      model: "claude-sonnet-4-20250514",
+      model: "claude-3-haiku-20240307",
       max_tokens: 300,
       temperature: 0.3,
       messages: [
@@ -2108,7 +2696,7 @@ Extract the most relevant quote from the transcript for each match.
 RESPOND WITH ONLY JSON, NO OTHER TEXT.`;
 
     const body = {
-      model: "claude-sonnet-4-20250514",
+      model: "claude-3-haiku-20240307",
       max_tokens: 800,
       temperature: 0.1,
       messages: [
@@ -2757,4 +3345,213 @@ async function processTestTranscript(sessionCode, transcript) {
   // Process with AI
   return await processCheckboxTranscript(transcript, criteria, scenario);
 }
+
+/* New mindmap-specific chunk transcription endpoint */
+app.post("/api/transcribe-mindmap-chunk", upload.single('file'), async (req, res) => {
+  const startTime = Date.now();
+  
+  try {
+    const { sessionCode, mode } = req.body;
+    const file = req.file;
+    
+    if (!file || !sessionCode) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Missing file or session code' 
+      });
+    }
+
+    console.log(`📦 Received mindmap chunk for transcription`);
+    console.log(`📁 Processing mindmap chunk: ${file.size} bytes, session: ${sessionCode}`);
+
+    // Get session data
+    const session = await db.collection("sessions").findOne({ code: sessionCode });
+    if (!session) {
+      return res.status(404).json({ 
+        success: false, 
+        error: 'Session not found' 
+      });
+    }
+
+    // Transcribe the audio chunk
+    console.log(`🎯 Transcribing audio chunk...`);
+    const transcriptionResult = await transcribe(file.buffer, file.mimetype);
+    
+    // Extract transcript text properly
+    let transcript = '';
+    if (typeof transcriptionResult === 'string') {
+      transcript = transcriptionResult;
+    } else if (transcriptionResult && transcriptionResult.text) {
+      transcript = transcriptionResult.text;
+    } else if (transcriptionResult) {
+      // Handle other possible formats
+      transcript = String(transcriptionResult);
+    }
+    
+    // Ensure we have a valid string
+    transcript = String(transcript || '').trim();
+    
+    if (!transcript || transcript.length === 0) {
+      return res.json({
+        success: true,
+        transcript: '',
+        message: 'No speech detected in audio chunk',
+        mindmapData: null
+      });
+    }
+
+    console.log(`📝 Transcription successful: "${transcript}"`);
+    
+    // Add to transcript history for context
+    addToTranscriptHistory(sessionCode, transcript);
+    
+    // Get contextual transcript (current + previous 2 chunks)
+    const contextualTranscript = getContextualTranscript(sessionCode);
+
+    // Get current mindmap state
+    const currentMindmapData = await getMindmapData(sessionCode);
+    
+    let result;
+    let mindmapData = null;
+
+    if (!currentMindmapData || !currentMindmapData.children || currentMindmapData.children.length === 0) {
+      // Generate initial mindmap with contextual transcript
+      console.log(`🧠 Generating initial mindmap from transcript...`);
+      mindmapData = await generateInitialMindmap(contextualTranscript, session.main_topic);
+      
+      if (mindmapData) {
+        // Store the initial mindmap
+        await db.collection("sessions").updateOne(
+          { code: sessionCode },
+          { 
+            $set: { 
+              mindmap_data: mindmapData,
+              last_updated: new Date()
+            }
+          }
+        );
+        
+        result = {
+          success: true,
+          transcript: transcript,
+          mindmapData: mindmapData,
+          message: `Initial mindmap created with contextual analysis`,
+          rawAiResponse: `Generated from ${sessionTranscriptHistory.get(sessionCode)?.length || 1} chunks of context`
+        };
+      } else {
+        // No meaningful content found
+        result = {
+          success: true,
+          transcript: transcript,
+          mindmapData: currentMindmapData,
+          message: 'No academic content detected in speech',
+          filtered: true
+        };
+      }
+    } else {
+      // Expand existing mindmap with contextual transcript
+      console.log(`🧠 Expanding mindmap with contextual speech...`);
+      const expansionResult = await expandMindmap(contextualTranscript, currentMindmapData, session.main_topic);
+      
+      if (!expansionResult.filtered) {
+        // Update mindmap in database
+        await db.collection("sessions").updateOne(
+          { code: sessionCode },
+          { 
+            $set: { 
+              mindmap_data: expansionResult.updatedMindmap,
+              last_updated: new Date()
+            }
+          }
+        );
+        
+        mindmapData = expansionResult.updatedMindmap;
+      } else {
+        mindmapData = currentMindmapData; // Keep existing mindmap unchanged
+      }
+      
+      result = {
+        success: true,
+        transcript: transcript,
+        mindmapData: mindmapData,
+        message: expansionResult.explanation,
+        rawAiResponse: expansionResult.rawResponse,
+        filtered: expansionResult.filtered
+      };
+    }
+
+    const processingTime = Date.now() - startTime;
+    console.log(`✅ Mindmap chunk processed successfully in ${processingTime}ms`);
+    
+    res.json(result);
+
+  } catch (error) {
+    const processingTime = Date.now() - startTime;
+    console.error(`❌ Error processing mindmap chunk (${processingTime}ms):`, error);
+    
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to process mindmap chunk',
+      transcript: '',
+      mindmapData: null
+    });
+  }
+});
+
+// Cleanup function for inactive sessions (called on server shutdown)
+async function markAllSessionsInactive() {
+  try {
+    const result = await db.collection("sessions").updateMany(
+      { active: true },
+      { 
+        $set: { 
+          active: false, 
+          ended_at: new Date() 
+        } 
+      }
+    );
+    
+    // Clear all transcript histories
+    sessionTranscriptHistory.clear();
+    console.log("🗑️ Cleared all transcript histories");
+    
+    console.log(`💾 Marked ${result.modifiedCount} sessions as inactive`);
+  } catch (error) {
+    console.error("❌ Error marking sessions inactive:", error);
+  }
+}
+
+// ... existing code ...
+
+// Enhanced session cleanup
+app.delete("/api/sessions/:sessionCode", async (req, res) => {
+  try {
+    const { sessionCode } = req.params;
+    
+    // Stop auto-summary if running
+    stopAutoSummary(sessionCode);
+    
+    // Clear transcript history
+    clearTranscriptHistory(sessionCode);
+    
+    // Remove from active sessions
+    activeSessions.delete(sessionCode);
+    
+    // Mark session as inactive in database
+    await db.collection("sessions").updateOne(
+      { code: sessionCode },
+      { 
+        $set: { 
+          active: false,
+          ended_at: new Date()
+        }
+      }
+    );
+
+    res.json({ success: true, message: "Session ended successfully" });
+  } catch (error) {
+    console.error("❌ Error ending session:", error);
+    res.status(500).json({ success: false, error: "Failed to end session" });
+  }
+});
 

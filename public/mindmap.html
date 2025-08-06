@@ -3,40 +3,182 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Smart Classroom - Mindmap Mode</title>
+    <title>Smart Classroom - AI Mindmap Mode</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
     <script src="https://d3js.org/d3.v7.min.js"></script>
     <style>
-        .gradient-bg { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
-        .mindmap-node { cursor: pointer; }
-        .mindmap-node:hover { stroke-width: 3px; }
-        .mindmap-link { fill: none; stroke: #999; stroke-width: 2px; }
-        .logs-panel { max-height: 400px; overflow-y: auto; }
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        
+        body { 
+            font-family: 'Inter', sans-serif; 
+        }
+        
+        .gradient-bg { 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+        }
+        
+        /* D3.js Mindmap Styles */
+        .mindmap-container {
+            background: radial-gradient(circle at 50% 50%, #f8fafc 0%, #e2e8f0 100%);
+            border-radius: 12px;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .link {
+            fill: none;
+            stroke: #94a3b8;
+            stroke-width: 2px;
+            transition: all 0.3s ease;
+        }
+        
+        .link:hover {
+            stroke: #667eea;
+            stroke-width: 3px;
+        }
+        
+        .node circle {
+            cursor: pointer;
+            transition: all 0.3s ease;
+            filter: drop-shadow(0 2px 6px rgba(0,0,0,0.1));
+        }
+        
+        .node:hover circle {
+            filter: drop-shadow(0 4px 12px rgba(0,0,0,0.2));
+            transform: scale(1.1);
+        }
+        
+        .node text {
+            font-family: 'Inter', sans-serif;
+            font-weight: 500;
+            pointer-events: none;
+            text-shadow: 0 1px 2px rgba(255,255,255,0.8);
+        }
+        
+        /* Chat Styles */
+        .chat-message {
+            margin-bottom: 12px;
+            padding: 12px 16px;
+            border-radius: 12px;
+            max-width: 85%;
+            word-wrap: break-word;
+            animation: fadeIn 0.3s ease-out;
+        }
+        
+        .chat-message.user {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            margin-left: auto;
+            border-bottom-right-radius: 4px;
+        }
+        
+        .chat-message.ai {
+            background: #f1f5f9;
+            color: #334155;
+            border: 1px solid #e2e8f0;
+            border-bottom-left-radius: 4px;
+        }
+        
+        .collapsible-response {
+            margin-top: 8px;
+            border: 1px solid #d1d5db;
+            border-radius: 8px;
+            overflow: hidden;
+            background: #f9fafb;
+        }
+        
+        .collapsible-header {
+            padding: 8px 12px;
+            background: #e5e7eb;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 500;
+            color: #6b7280;
+            display: flex;
+            align-items: center;
+            justify-content: between;
+        }
+        
+        .collapsible-header:hover {
+            background: #d1d5db;
+        }
+        
+        .collapsible-content {
+            padding: 12px;
+            background: #f9fafb;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 11px;
+            color: #374151;
+            border-top: 1px solid #d1d5db;
+            max-height: 200px;
+            overflow-y: auto;
+            display: none;
+        }
+        
+        .collapsible-content.expanded {
+            display: block;
+        }
+        
+        /* Animations */
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        @keyframes nodeEnter {
+            from { opacity: 0; transform: scale(0.3); }
+            to { opacity: 1; transform: scale(1); }
+        }
+        
+        .node-enter {
+            animation: nodeEnter 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+        
+        /* Touch optimization */
+        .touch-friendly {
+            touch-action: manipulation;
+            -webkit-tap-highlight-color: transparent;
+        }
+        
+        /* Scrollbar styling */
+        .custom-scroll::-webkit-scrollbar {
+            width: 6px;
+        }
+        
+        .custom-scroll::-webkit-scrollbar-track {
+            background: #f1f5f9;
+            border-radius: 3px;
+        }
+        
+        .custom-scroll::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 3px;
+        }
+        
+        .custom-scroll::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
     </style>
 </head>
 <body class="bg-gray-50 font-sans">
     <!-- Header -->  
     <header class="gradient-bg text-white shadow-xl">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between space-y-3 sm:space-y-0">
+            <div class="flex items-center justify-between">
                 <div class="flex items-center space-x-4">
-                    <div class="w-10 h-10 bg-white/20 rounded-lg flex items-center justify-center backdrop-blur-sm">
+                    <div class="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center backdrop-blur-sm">
                         <i data-lucide="brain-circuit" class="w-6 h-6 text-white"></i>
                     </div>
                     <div>
-                        <h1 class="text-lg sm:text-xl font-semibold">Smart Classroom - Mindmap Mode</h1>
-                        <p class="text-white/80 text-sm">Session: <span id="sessionCode" class="font-mono">-</span></p>
+                        <h1 class="text-xl font-bold">🧠 AI Mindmap Mode</h1>
+                        <p class="text-white/80 text-sm">Session: <span id="sessionCode" class="font-mono font-semibold">-</span></p>
                     </div>
                 </div>
-                <div class="flex items-center space-x-2 sm:space-x-4">
-                    <button id="toggleLogs" class="bg-white/20 backdrop-blur-sm px-3 sm:px-4 py-2 rounded-lg text-sm font-medium hover:bg-white/30 transition-colors">
-                        <span class="hidden sm:inline">Show Logs</span>
-                        <span class="sm:hidden">Logs</span>
-                    </button>
-                    <a href="admin.html" class="bg-white/20 backdrop-blur-sm px-3 sm:px-4 py-2 rounded-lg text-sm font-medium hover:bg-white/30 transition-colors">
-                        <span class="hidden sm:inline">Back to Admin</span>
-                        <span class="sm:hidden">Admin</span>
+                <div class="flex items-center space-x-3">
+                    <a href="admin.html" class="bg-white/20 backdrop-blur-sm px-4 py-2 rounded-lg text-sm font-medium hover:bg-white/30 transition-colors touch-friendly">
+                        <i data-lucide="arrow-left" class="w-4 h-4 mr-2"></i>
+                        Back to Admin
                     </a>
                 </div>
             </div>
@@ -44,576 +186,1348 @@
     </header>
 
     <!-- Main Content -->
-    <main class="max-w-7xl mx-auto p-4 sm:p-6">
-        <!-- Setup Panel -->
-        <div id="setupPanel" class="bg-white rounded-xl shadow-lg border border-gray-200 p-4 sm:p-6 mb-6">
-            <h2 class="text-lg sm:text-xl font-semibold text-gray-900 mb-4 flex items-center">
-                <i data-lucide="settings" class="w-5 h-5 mr-2"></i>
-                Setup Mindmap Session
-            </h2>
+    <div class="max-w-7xl mx-auto p-4 sm:p-6">
+        <!-- Initial Setup Section -->
+        <div id="setupSection" class="bg-white rounded-xl shadow-lg border border-gray-200 p-6 mb-6">
+            <div class="text-center mb-6">
+                <h2 class="text-2xl font-bold text-gray-900 mb-2">🧠 AI Mindmap Generator</h2>
+                <p class="text-gray-600">Transform your speech into beautiful, interactive mindmaps using AI</p>
+            </div>
             
-            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
+            <div class="space-y-4">
                 <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-2">Session Code</label>
-                    <div class="flex items-center space-x-2">
-                        <input id="sessionCodeInput" type="text" readonly
-                               class="flex-1 px-3 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-600 text-base font-mono"
-                               placeholder="Auto-generated">
-                        <button id="generateCodeBtn" class="bg-blue-100 hover:bg-blue-200 text-blue-700 px-3 py-2 rounded-lg transition-colors flex items-center">
-                            <i data-lucide="refresh-cw" class="w-4 h-4"></i>
+                    <label for="mainTopicInput" class="block text-sm font-semibold text-gray-700 mb-2">Main Topic</label>
+                    <input 
+                        id="mainTopicInput" 
+                        type="text" 
+                        class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-base"
+                        placeholder="Enter the main topic for your mindmap..."
+                        value=""
+                    >
+                </div>
+                
+                <!-- Hidden test data section -->
+                <div id="testDataSection" class="hidden">
+                    <div>
+                        <label for="initialTextInput" class="block text-sm font-semibold text-gray-700 mb-2">Initial Text</label>
+                        <textarea 
+                            id="initialTextInput" 
+                            rows="6" 
+                            class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-base resize-vertical"
+                            placeholder="Paste your initial text here... For example: 'Cats are fascinating creatures with extraordinary sensory abilities. They possess a third eyelid called the nictitating membrane...'"
+                        ></textarea>
+                    </div>
+                    
+                    <div class="flex flex-col sm:flex-row gap-3">
+                        <button 
+                            id="generateBtn" 
+                            class="flex-1 bg-gradient-to-r from-blue-600 to-purple-600 text-white px-6 py-3 rounded-lg hover:from-blue-700 hover:to-purple-700 transition-all duration-200 flex items-center justify-center text-base font-semibold shadow-lg hover:shadow-xl touch-friendly"
+                        >
+                            <i data-lucide="brain-circuit" class="w-5 h-5 mr-2"></i>
+                            Generate Initial Mindmap
+                        </button>
+                        <button 
+                            id="loadTestDataBtn" 
+                            class="bg-gradient-to-r from-orange-500 to-pink-500 text-white px-6 py-3 rounded-lg hover:from-orange-600 hover:to-pink-600 transition-all duration-200 flex items-center justify-center text-base font-semibold shadow-lg hover:shadow-xl touch-friendly"
+                        >
+                            <i data-lucide="zap" class="w-5 h-5 mr-2"></i>
+                            🐱 Load Cat Example
+                        </button>
+                        <button 
+                            id="clearBtn" 
+                            class="bg-gray-500 text-white px-6 py-3 rounded-lg hover:bg-gray-600 transition-colors flex items-center justify-center text-base font-medium touch-friendly"
+                        >
+                            <i data-lucide="trash-2" class="w-4 h-4 mr-2"></i>
+                            Clear
                         </button>
                     </div>
-                    <p class="text-xs text-gray-500 mt-1">Automatically generated - click refresh to generate new</p>
                 </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-2">Main Topic *</label>
-                    <input id="mainTopicInput" type="text" 
-                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-base"
-                           placeholder="Enter main discussion topic" required>
+                
+                <!-- Voice Recording Section -->
+                <div class="flex flex-col sm:flex-row gap-3">
+                    <button 
+                        id="startRecordingBtn" 
+                        class="flex-1 bg-gradient-to-r from-green-600 to-blue-600 text-white px-6 py-3 rounded-lg hover:from-green-700 hover:to-blue-700 transition-all duration-200 flex items-center justify-center text-base font-semibold shadow-lg hover:shadow-xl touch-friendly"
+                    >
+                        <i data-lucide="mic" class="w-5 h-5 mr-2"></i>
+                        🎤 Start Auto-Recording
+                    </button>
+                    <button 
+                        id="stopRecordingMainBtn"
+                        class="hidden flex-1 bg-gradient-to-r from-red-600 to-red-700 text-white px-6 py-3 rounded-lg hover:from-red-700 hover:to-red-800 transition-all duration-200 flex items-center justify-center text-base font-semibold shadow-lg hover:shadow-xl touch-friendly"
+                    >
+                        <i data-lucide="square" class="w-5 h-5 mr-2"></i>
+                        🛑 Stop Recording
+                    </button>
+                    <div class="flex items-center space-x-2">
+                        <label for="intervalInput" class="text-sm font-medium text-gray-700 whitespace-nowrap">Interval:</label>
+                        <input 
+                            id="intervalInput" 
+                            type="number" 
+                            min="5" 
+                            max="60" 
+                            value="10" 
+                            class="w-20 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                        >
+                        <span class="text-sm text-gray-600">sec</span>
+                    </div>
+                    <button 
+                        id="toggleTestBtn" 
+                        class="bg-gray-500 text-white px-6 py-3 rounded-lg hover:bg-gray-600 transition-colors flex items-center justify-center text-base font-medium touch-friendly"
+                    >
+                        <i data-lucide="settings" class="w-4 h-4 mr-2"></i>
+                        Show Test Options
+                    </button>
                 </div>
-                <div class="sm:col-span-2 lg:col-span-1">
-                    <label class="block text-sm font-medium text-gray-700 mb-2">Recording Interval</label>
-                    <select id="intervalSelect" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-base">
-                        <option value="30">30 seconds</option>
-                        <option value="60">60 seconds</option>
-                        <option value="120">2 minutes</option>
-                    </select>
+                
+                <!-- Recording Status -->
+                <div id="recordingStatus" class="hidden bg-red-50 border border-red-200 rounded-lg p-4">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center">
+                            <div class="w-3 h-3 bg-red-500 rounded-full animate-pulse mr-3"></div>
+                            <span class="text-red-800 font-medium">🎤 Auto-Recording Active</span>
+                        </div>
+                        <div class="flex items-center space-x-2">
+                            <span class="text-sm text-gray-600">Interval: <span id="currentInterval">10</span>s</span>
+                        </div>
+                    </div>
+                    <div class="mt-2 text-sm text-red-600">
+                        <div class="flex items-center justify-between">
+                            <span>🎓 <strong>Academic Mode:</strong> Only educational content will be added to mindmap</span>
+                            <span class="text-gray-600">Status: <span id="uploadStatus">Ready</span></span>
+                        </div>
+                    </div>
                 </div>
             </div>
             
-            <div class="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-4">
-                <button id="createSessionBtn" class="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center text-base font-medium">
-                    <i data-lucide="play-circle" class="w-4 h-4 mr-2"></i>
-                    Create & Start Session
-                </button>
-                <button id="loadSessionBtn" class="bg-gray-600 text-white px-6 py-3 rounded-lg hover:bg-gray-700 transition-colors flex items-center justify-center text-base font-medium">
-                    <i data-lucide="folder-open" class="w-4 h-4 mr-2"></i>
-                    Load Existing Session
-                </button>
+            <div id="loadingIndicator" class="hidden text-center py-8">
+                <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mb-4"></div>
+                <p class="text-gray-600">Processing your speech and updating mindmap...</p>
             </div>
             
-            <div class="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                <div class="flex items-start space-x-2">
-                    <i data-lucide="info" class="w-4 h-4 text-blue-600 mt-0.5 flex-shrink-0"></i>
-                    <div class="text-sm text-blue-800">
-                        <p class="font-medium mb-1">How it works:</p>
-                        <ul class="text-xs space-y-1">
-                            <li>• Enter your main discussion topic</li>
-                            <li>• Session code is automatically generated</li>
-                            <li>• AI will build a mind map as you discuss</li>
-                            <li>• Irrelevant chatter is filtered out automatically</li>
-                        </ul>
+            <div id="errorMessage" class="hidden mt-4 p-4 bg-red-50 border border-red-200 rounded-lg text-red-800"></div>
+        </div>
+
+        <!-- Main Mindmap Interface -->
+        <div id="mindmapInterface" class="hidden">
+            <div class="flex gap-6">
+                <!-- Mindmap Visualization -->
+                <div class="flex-1 bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
+                    <div class="p-4 border-b border-gray-100 bg-gradient-to-r from-blue-50 to-purple-50">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <h3 class="text-lg font-bold text-gray-900 flex items-center">
+                                    <i data-lucide="network" class="w-5 h-5 mr-2 text-blue-600"></i>
+                                    Interactive Mindmap
+                                </h3>
+                                <p class="text-sm text-gray-600 mt-1">Zoom with mouse wheel, drag to pan, hover for details</p>
+                            </div>
+                            <div class="flex items-center space-x-2">
+                                <button 
+                                    id="recenterBtn"
+                                    class="bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 transition-colors flex items-center text-sm font-medium"
+                                >
+                                    <i data-lucide="focus" class="w-4 h-4 mr-2"></i>
+                                    Recenter
+                                </button>
+                                <button 
+                                    id="toggleChatBtn"
+                                    class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center text-sm font-medium"
+                                >
+                                    <i data-lucide="message-circle" class="w-4 h-4 mr-2"></i>
+                                    Show AI Chat
+                                </button>
+                                <button 
+                                    id="continueRecordingBtn"
+                                    class="hidden bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition-colors flex items-center text-sm font-medium"
+                                >
+                                    <i data-lucide="square" class="w-4 h-4 mr-2"></i>
+                                    Stop Recording
+                                </button>
+                                <button 
+                                    id="resetSessionBtn"
+                                    class="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition-colors flex items-center text-sm font-medium"
+                                >
+                                    <i data-lucide="rotate-ccw" class="w-4 h-4 mr-2"></i>
+                                    Reset
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mindmap-container" style="height: 600px;" id="mindmapContainer">
+                        <div class="flex items-center justify-center h-full text-gray-500">
+                            <div class="text-center">
+                                <i data-lucide="brain-circuit" class="w-16 h-16 mx-auto mb-4 opacity-50"></i>
+                                <p class="text-lg font-medium">Your mindmap will appear here</p>
+                                <p class="text-sm opacity-75">Enter a topic and start speaking to generate your mindmap</p>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Session Info Bar -->
+                    <div id="sessionInfoBar" class="hidden p-3 border-t border-gray-100 bg-gray-50 text-sm text-gray-600">
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center space-x-4">
+                                <span><strong>Topic:</strong> <span id="currentTopic">-</span></span>
+                                <span><strong>Started:</strong> <span id="sessionStartTime">-</span></span>
+                                <span><strong>Duration:</strong> <span id="sessionDuration">0:00</span></span>
+                            </div>
+                            <button 
+                                id="saveSessionBtn"
+                                class="bg-blue-600 text-white px-3 py-1 rounded text-sm hover:bg-blue-700 transition-colors flex items-center"
+                            >
+                                <i data-lucide="download" class="w-4 h-4 mr-1"></i>
+                                Download JSON
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Chat Panel (Hidden by default, slides in from right) -->
+                <div id="chatPanel" class="hidden w-96 bg-white rounded-xl shadow-lg border border-gray-200 flex flex-col" style="height: 680px;">
+                    <div class="p-4 border-b border-gray-100 bg-gradient-to-r from-green-50 to-blue-50">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <h3 class="text-lg font-bold text-gray-900 flex items-center">
+                                    <i data-lucide="message-circle" class="w-5 h-5 mr-2 text-green-600"></i>
+                                    💬 AI Processing Log
+                                </h3>
+                                <p class="text-sm text-gray-600 mt-1">See how AI processes your speech</p>
+                            </div>
+                            <button 
+                                id="hideChatBtn"
+                                class="bg-gray-500 text-white px-3 py-1 rounded text-sm hover:bg-gray-600 transition-colors"
+                            >
+                                <i data-lucide="x" class="w-4 h-4"></i>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div id="chatMessages" class="flex-1 p-4 overflow-y-auto custom-scroll space-y-3">
+                        <div class="text-center text-gray-500 py-8">
+                            <i data-lucide="message-square-plus" class="w-8 h-8 mx-auto mb-2 opacity-50"></i>
+                            <p class="text-sm">AI processing logs will appear here when you speak!</p>
+                        </div>
+                    </div>
+
+                    <div class="p-4 border-t border-gray-100 bg-gray-50">
+                        <div class="flex gap-2">
+                            <textarea 
+                                id="chatInput" 
+                                rows="2" 
+                                disabled
+                                class="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm resize-none disabled:bg-gray-100 disabled:cursor-not-allowed"
+                                placeholder="Type additional information to add to your mindmap..."
+                                onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();addToMindmap();}"
+                            ></textarea>
+                            <button 
+                                id="sendBtn" 
+                                disabled
+                                class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center touch-friendly"
+                                onclick="addToMindmap()"
+                            >
+                                <i data-lucide="send" class="w-4 h-4"></i>
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
         </div>
-
-        <!-- Session Info Panel -->
-        <div id="sessionInfo" class="hidden bg-green-50 border border-green-200 rounded-xl p-4 mb-6">
-            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between space-y-2 sm:space-y-0">
-                <div class="flex items-center">
-                    <i data-lucide="check-circle" class="w-5 h-5 text-green-600 mr-2"></i>
-                    <span class="text-green-800 font-medium">Session Active: </span>
-                    <span id="activeSessionCode" class="font-mono text-green-900 ml-1"></span>
-                </div>
-                <div class="text-green-700 text-sm">
-                    <span class="font-medium">Topic: </span>
-                    <span id="activeMainTopic" class="font-medium text-green-900 ml-1"></span>
-                </div>
-            </div>
-        </div>
-
-        <!-- Main Content Area -->
-        <div class="grid grid-cols-1 lg:grid-cols-4 gap-4 sm:gap-6">
-            <!-- Mindmap Visualization -->
-            <div class="lg:col-span-3 bg-white rounded-xl shadow-lg border border-gray-200 order-1">
-                <div class="p-4 sm:p-6 border-b border-gray-100">
-                    <h3 class="text-lg font-semibold text-gray-900 flex items-center justify-between">
-                        <div class="flex items-center">
-                            <i data-lucide="network" class="w-5 h-5 mr-2"></i>
-                            Mind Map
-                        </div>
-                        <span id="nodeCount" class="text-sm text-gray-500">0 nodes</span>
-                    </h3>
-                </div>
-                <div id="mindmapContainer" class="p-2 sm:p-4" style="height: 500px;">
-                    <div id="emptyState" class="h-full flex items-center justify-center text-gray-500">
-                        <div class="text-center">
-                            <i data-lucide="brain-circuit" class="w-16 h-16 mx-auto mb-4 opacity-50"></i>
-                            <p class="text-lg font-medium">No session active</p>
-                            <p class="text-sm px-4">Create a session to start building your mindmap</p>
-                        </div>
-                    </div>
-                    <svg id="mindmapSvg" class="hidden w-full h-full touch-manipulation"></svg>
-                </div>
-            </div>
-
-            <!-- Logs Panel -->
-            <div id="logsPanel" class="bg-white rounded-xl shadow-lg border border-gray-200 lg:order-2 order-2">
-                <div class="p-4 border-b border-gray-100">
-                    <h3 class="text-lg font-semibold text-gray-900 flex items-center justify-between">
-                        <div class="flex items-center">
-                            <i data-lucide="scroll-text" class="w-5 h-5 mr-2"></i>
-                            Processing Logs
-                        </div>
-                        <button id="clearLogsBtn" class="text-sm text-red-600 hover:text-red-800 px-2 py-1 rounded hover:bg-red-50">Clear</button>
-                    </h3>
-                </div>
-                <div id="logsContainer" class="logs-panel p-4 space-y-2" style="max-height: 400px; overflow-y: auto;">
-                    <div class="text-gray-500 text-sm text-center py-8">
-                        No logs yet
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Recording Controls -->
-        <div id="recordingControls" class="hidden fixed bottom-6 right-4 sm:right-6 bg-white rounded-xl shadow-lg border border-gray-200 p-4">
-            <div class="flex items-center space-x-4">
-                <div id="recordingStatus" class="flex items-center space-x-2">
-                    <div class="w-3 h-3 bg-red-500 rounded-full animate-pulse"></div>
-                    <span class="text-sm font-medium text-gray-700">Recording...</span>
-                </div>
-                <button id="stopRecordingBtn" class="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition-colors flex items-center touch-manipulation">
-                    <i data-lucide="square" class="w-4 h-4 mr-2"></i>
-                    Stop
-                </button>
-            </div>
-        </div>
-    </main>
+    </div>
 
     <script>
         let currentSession = null;
-        let mediaRecorder = null;
-        let recordingInterval = null;
+        let currentMindmapData = null;
+        let chatHistory = [];
         let isRecording = false;
-        let mindmapData = { nodes: [], links: [] };
-        let svg, simulation, node, link, text;
+        let mediaRecorder = null;
+        let audioChunks = [];
+        let recognition = null;
+        let sessionStartTime = null;
+        let durationTimer = null;
+        let stream = null;
+        let chunkInterval = 10000; // Default 10 seconds
+        let recordingTimeout = null;
 
-        // Initialize Lucide icons
+        // Initialize on page load
         document.addEventListener('DOMContentLoaded', () => {
             lucide.createIcons();
-            initializeMindmapVisualization();
-            generateSessionCode(); // Auto-generate session code on load
+            setupEventListeners();
         });
 
-        // Auto-generate session code
-        function generateSessionCode() {
-            const code = Math.floor(100000 + Math.random() * 900000).toString();
-            document.getElementById('sessionCodeInput').value = code;
-            return code;
+        function setupEventListeners() {
+            document.getElementById('generateBtn').addEventListener('click', generateInitialMindmap);
+            document.getElementById('loadTestDataBtn').addEventListener('click', loadTestData);
+            document.getElementById('clearBtn').addEventListener('click', clearAll);
+            document.getElementById('startRecordingBtn').addEventListener('click', startAutoRecording);
+            document.getElementById('stopRecordingMainBtn').addEventListener('click', stopRecording);
+            document.getElementById('continueRecordingBtn').addEventListener('click', stopRecording);
+            document.getElementById('toggleTestBtn').addEventListener('click', toggleTestSection);
+            document.getElementById('toggleChatBtn').addEventListener('click', toggleChatPanel);
+            document.getElementById('hideChatBtn').addEventListener('click', hideChatPanel);
+            document.getElementById('recenterBtn').addEventListener('click', recenterMindmap);
+            document.getElementById('resetSessionBtn').addEventListener('click', resetSession);
+            document.getElementById('saveSessionBtn').addEventListener('click', saveSession);
+            document.getElementById('intervalInput').addEventListener('change', updateInterval);
         }
 
-        // Initialize D3.js mindmap visualization
-        function initializeMindmapVisualization() {
-            const container = document.getElementById('mindmapContainer');
-            const width = container.clientWidth;
-            const height = container.clientHeight;
-
-            svg = d3.select('#mindmapSvg')
-                .attr('width', width)
-                .attr('height', height);
-
-            // Create simulation
-            simulation = d3.forceSimulation()
-                .force('link', d3.forceLink().id(d => d.id).distance(100))
-                .force('charge', d3.forceManyBody().strength(-300))
-                .force('center', d3.forceCenter(width / 2, height / 2))
-                .force('collision', d3.forceCollide().radius(50));
-
-            // Create groups for links and nodes
-            const linkGroup = svg.append('g').attr('class', 'links');
-            const nodeGroup = svg.append('g').attr('class', 'nodes');
-
-            updateVisualization();
+        function updateInterval() {
+            const intervalInput = document.getElementById('intervalInput');
+            const currentIntervalDisplay = document.getElementById('currentInterval');
+            
+            if (intervalInput) {
+                const intervalSeconds = parseInt(intervalInput.value) || 10;
+                chunkInterval = intervalSeconds * 1000;
+                if (currentIntervalDisplay) {
+                    currentIntervalDisplay.textContent = intervalSeconds;
+                }
+            }
         }
 
-        function updateVisualization() {
-            if (!svg || mindmapData.nodes.length === 0) return;
-
-            // Update links
-            link = svg.select('.links')
-                .selectAll('line')
-                .data(mindmapData.links)
-                .join('line')
-                .attr('class', 'mindmap-link')
-                .attr('stroke-width', 2);
-
-            // Update nodes
-            node = svg.select('.nodes')
-                .selectAll('g')
-                .data(mindmapData.nodes)
-                .join('g')
-                .attr('class', 'mindmap-node')
-                .call(d3.drag()
-                    .on('start', dragstarted)
-                    .on('drag', dragged)
-                    .on('end', dragended));
-
-            // Add circles to nodes
-            node.selectAll('circle').remove();
-            node.append('circle')
-                .attr('r', d => 20 + (d.level * 10))
-                .attr('fill', d => {
-                    const colors = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444'];
-                    return colors[d.level] || '#6B7280';
-                })
-                .attr('stroke', '#fff')
-                .attr('stroke-width', 2);
-
-            // Add text to nodes
-            node.selectAll('text').remove();
-            node.append('text')
-                .text(d => d.content.length > 20 ? d.content.substring(0, 20) + '...' : d.content)
-                .attr('text-anchor', 'middle')
-                .attr('dy', '.35em')
-                .attr('font-size', d => Math.max(10, 14 - d.level * 2))
-                .attr('fill', 'white')
-                .attr('font-weight', 'bold');
-
-            // Update simulation
-            simulation
-                .nodes(mindmapData.nodes)
-                .on('tick', ticked);
-
-            simulation.force('link')
-                .links(mindmapData.links);
-
-            simulation.alpha(1).restart();
-
-            // Update node count
-            document.getElementById('nodeCount').textContent = `${mindmapData.nodes.length} nodes`;
+        function updateStatus(message, type = 'info') {
+            const statusEl = document.getElementById('uploadStatus');
+            if (statusEl) {
+                statusEl.textContent = message;
+                statusEl.className = type === 'error' ? 'text-red-600' : 
+                                   type === 'success' ? 'text-green-600' : 
+                                   type === 'processing' ? 'text-blue-600' : 'text-gray-600';
+            }
         }
 
-        function ticked() {
-            link
-                .attr('x1', d => d.source.x)
-                .attr('y1', d => d.source.y)
-                .attr('x2', d => d.target.x)
-                .attr('y2', d => d.target.y);
-
-            node
-                .attr('transform', d => `translate(${d.x},${d.y})`);
-        }
-
-        function dragstarted(event, d) {
-            if (!event.active) simulation.alphaTarget(0.3).restart();
-            d.fx = d.x;
-            d.fy = d.y;
-        }
-
-        function dragged(event, d) {
-            d.fx = event.x;
-            d.fy = event.y;
-        }
-
-        function dragended(event, d) {
-            if (!event.active) simulation.alphaTarget(0);
-            d.fx = null;
-            d.fy = null;
-        }
-
-        // Event listeners
-        document.getElementById('createSessionBtn').addEventListener('click', createSession);
-        document.getElementById('loadSessionBtn').addEventListener('click', loadSession);
-        document.getElementById('stopRecordingBtn').addEventListener('click', stopRecording);
-        document.getElementById('toggleLogs').addEventListener('click', toggleLogsPanel);
-        document.getElementById('clearLogsBtn').addEventListener('click', clearLogs);
-        document.getElementById('generateCodeBtn').addEventListener('click', () => {
-            generateSessionCode();
-            // Re-initialize icons after DOM change
-            setTimeout(() => lucide.createIcons(), 100);
-        });
-
-        async function createSession() {
-            let sessionCode = document.getElementById('sessionCodeInput').value.trim();
+        async function startAutoRecording() {
             const mainTopic = document.getElementById('mainTopicInput').value.trim();
-            const interval = parseInt(document.getElementById('intervalSelect').value) * 1000;
-
+            
             if (!mainTopic) {
-                alert('Please enter the main discussion topic');
+                showError('Please enter a main topic before starting to record.');
                 return;
             }
 
-            // Generate new code if empty
-            if (!sessionCode) {
-                generateSessionCode();
-                sessionCode = document.getElementById('sessionCodeInput').value.trim();
-            }
-
             try {
-                const response = await fetch('/api/mindmap/session', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ sessionCode, mainTopic, interval })
+                // Update interval from input
+                updateInterval();
+                
+                // Create session if it doesn't exist
+                if (!currentSession) {
+                    await createMindmapSession(mainTopic);
+                }
+
+                // Get audio permission
+                stream = await navigator.mediaDevices.getUserMedia({ 
+                    audio: {
+                        channelCount: 1,
+                        sampleRate: 16000,
+                        echoCancellation: true,
+                        noiseSuppression: true
+                    } 
                 });
 
-                const result = await response.json();
-                if (result.success) {
-                    currentSession = { code: sessionCode, mainTopic, interval };
-                    showSessionInfo();
-                    await startRecording();
-                    await loadMindmapData();
-                } else {
-                    alert('Failed to create session: ' + result.error);
-                }
-            } catch (error) {
-                console.error('Error creating session:', error);
-                alert('Failed to create session');
-            }
-        }
-
-        async function loadSession() {
-            const sessionCode = document.getElementById('sessionCodeInput').value.trim();
-            if (!sessionCode) {
-                alert('Please enter a session code');
-                return;
-            }
-
-            try {
-                await loadMindmapData(sessionCode);
-                currentSession = { code: sessionCode };
-                showSessionInfo();
-            } catch (error) {
-                alert('Failed to load session');
-            }
-        }
-
-        async function loadMindmapData(sessionCode = null) {
-            const code = sessionCode || currentSession?.code;
-            if (!code) return;
-
-            try {
-                const response = await fetch(`/api/mindmap/${code}`);
-                const data = await response.json();
-
-                if (data.success) {
-                    // Convert nodes to D3 format
-                    mindmapData.nodes = data.nodes.map(node => ({
-                        id: node._id,
-                        content: node.content,
-                        level: node.level,
-                        parent_id: node.parent_id,
-                        x: node.x || 0,
-                        y: node.y || 0
-                    }));
-
-                    // Create links
-                    mindmapData.links = [];
-                    data.nodes.forEach(node => {
-                        if (node.parent_id) {
-                            mindmapData.links.push({
-                                source: node.parent_id,
-                                target: node._id
-                            });
-                        }
-                    });
-
-                    updateVisualization();
-                    displayLogs(data.logs);
-                    
-                    // Show visualization
-                    document.getElementById('emptyState').style.display = 'none';
-                    document.getElementById('mindmapSvg').classList.remove('hidden');
-                }
-            } catch (error) {
-                console.error('Error loading mindmap data:', error);
-            }
-        }
-
-        function showSessionInfo() {
-            document.getElementById('setupPanel').style.display = 'none';
-            document.getElementById('sessionInfo').classList.remove('hidden');
-            document.getElementById('activeSessionCode').textContent = currentSession.code;
-            document.getElementById('activeMainTopic').textContent = currentSession.mainTopic || '-';
-            document.getElementById('sessionCode').textContent = currentSession.code;
-        }
-
-        async function startRecording() {
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                // Update UI - Show recording interface
+                isRecording = true;
+                document.getElementById('setupSection').classList.add('hidden');
+                document.getElementById('mindmapInterface').classList.remove('hidden');
+                document.getElementById('recordingStatus').classList.remove('hidden');
                 
-                mediaRecorder = new MediaRecorder(stream);
-                const chunks = [];
+                // Show/hide recording buttons
+                document.getElementById('startRecordingBtn').classList.add('hidden');
+                document.getElementById('stopRecordingMainBtn').classList.remove('hidden');
+                document.getElementById('continueRecordingBtn').classList.remove('hidden');
+                
+                // Disable interval input during recording
+                document.getElementById('intervalInput').disabled = true;
+                
+                // Start recording cycles
+                startRecordingCycle();
+                updateStatus('Recording started', 'success');
+                
+                console.log(`🎤 Started auto-recording for topic: ${mainTopic} with ${chunkInterval/1000}s intervals`);
+                
+            } catch (error) {
+                console.error('❌ Failed to start auto-recording:', error);
+                showError('Failed to start recording: ' + error.message);
+                isRecording = false;
+                
+                // Reset button visibility on error
+                document.getElementById('startRecordingBtn').classList.remove('hidden');
+                document.getElementById('stopRecordingMainBtn').classList.add('hidden');
+            }
+        }
 
+        async function startRecordingCycle() {
+            if (!isRecording || !stream) return;
+            
+            try {
+                console.log(`🎬 Starting new recording cycle (${chunkInterval}ms)`);
+                
+                // Use proper WebM/Opus format
+                const options = { mimeType: 'audio/webm;codecs=opus' };
+                if (!MediaRecorder.isTypeSupported(options.mimeType)) {
+                    options.mimeType = 'audio/webm';
+                }
+                
+                mediaRecorder = new MediaRecorder(stream, options);
+                
                 mediaRecorder.ondataavailable = (event) => {
-                    chunks.push(event.data);
+                    if (event.data.size > 0) {
+                        console.log(`📦 Received audio chunk: ${event.data.size} bytes`);
+                        uploadChunk(event.data);
+                    }
                 };
-
-                mediaRecorder.onstop = async () => {
-                    const audioBlob = new Blob(chunks, { type: 'audio/webm' });
-                    await processAudio(audioBlob);
-                    chunks.length = 0;
+                
+                mediaRecorder.onerror = (event) => {
+                    console.error("❌ MediaRecorder error:", event.error);
+                    updateStatus("Recording error", "error");
                 };
-
-                // Start recording in intervals
-                const intervalMs = currentSession.interval || 30000;
-                recordingInterval = setInterval(() => {
-                    if (mediaRecorder.state === 'recording') {
+                
+                mediaRecorder.onstop = () => {
+                    console.log(`⏹️ Recording cycle stopped`);
+                    
+                    // If still recording, start the next cycle
+                    if (isRecording) {
+                        setTimeout(() => {
+                            startRecordingCycle();
+                        }, 100); // Brief pause between cycles
+                    }
+                };
+                
+                // Start recording
+                mediaRecorder.start();
+                
+                // Stop recording after the specified interval
+                recordingTimeout = setTimeout(() => {
+                    if (mediaRecorder && mediaRecorder.state === 'recording') {
+                        console.log(`⏰ Stopping recording after ${chunkInterval}ms`);
                         mediaRecorder.stop();
                     }
-                    mediaRecorder.start();
-                }, intervalMs);
-
-                mediaRecorder.start();
-                isRecording = true;
-                document.getElementById('recordingControls').classList.remove('hidden');
-
-            } catch (error) {
-                console.error('Error starting recording:', error);
-                alert('Failed to start recording. Please check microphone permissions.');
+                }, chunkInterval);
+                
+            } catch (err) {
+                console.error("❌ Failed to start recording cycle:", err);
+                updateStatus("Recording cycle failed", "error");
             }
         }
 
-        async function processAudio(audioBlob) {
-            try {
-                // Transcribe audio (reuse existing transcription logic)
-                const formData = new FormData();
-                formData.append('audio', audioBlob, 'audio.webm');
-
-                const transcribeResponse = await fetch('/api/transcribe', {
-                    method: 'POST',
-                    body: formData
-                });
-
-                const transcribeResult = await transcribeResponse.json();
-                if (transcribeResult.text) {
-                    // Process transcript for mindmap
-                    const processResponse = await fetch('/api/mindmap/process', {
+        async function uploadChunk(blob) {
+            const maxRetries = 3;
+            let retryCount = 0;
+            
+            while (retryCount < maxRetries) {
+                try {
+                    const formData = new FormData();
+                    formData.append('file', blob, `chunk_${Date.now()}.webm`);
+                    formData.append('sessionCode', currentSession.code);
+                    formData.append('mode', 'mindmap'); // Indicate this is for mindmap processing
+                    
+                    console.log(`📤 Uploading chunk (attempt ${retryCount + 1}/${maxRetries}): ${blob.size} bytes`);
+                    
+                    updateStatus(`Uploading audio... (${retryCount + 1}/${maxRetries})`, "processing");
+                    
+                    // Add timeout to prevent hanging uploads
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+                    
+                    const response = await fetch('http://localhost:10000/api/transcribe-mindmap-chunk', {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            sessionCode: currentSession.code,
-                            transcript: transcribeResult.text
-                        })
+                        body: formData,
+                        signal: controller.signal
                     });
-
-                    const processResult = await processResponse.json();
-                    if (processResult.success && processResult.newNode) {
-                        // Add new node to mindmap
-                        const newNode = {
-                            id: processResult.newNode._id,
-                            content: processResult.newNode.content,
-                            level: processResult.newNode.level,
-                            parent_id: processResult.newNode.parent_id,
-                            x: processResult.newNode.x,
-                            y: processResult.newNode.y
-                        };
-
-                        mindmapData.nodes.push(newNode);
-
-                        if (newNode.parent_id) {
-                            mindmapData.links.push({
-                                source: newNode.parent_id,
-                                target: newNode.id
-                            });
-                        }
-
-                        updateVisualization();
+                    
+                    clearTimeout(timeoutId);
+                    
+                    if (!response.ok) {
+                        const errorText = await response.text();
+                        throw new Error(`Upload failed: ${response.status} ${errorText}`);
                     }
-
-                    // Add to logs
-                    addLog({
-                        type: processResult.action === 'ignore' ? 'ignored_chatter' : 'processed_content',
-                        content: transcribeResult.text,
-                        ai_response: processResult,
-                        created_at: Date.now()
-                    });
+                    
+                    const result = await response.json();
+                    console.log("✅ Chunk uploaded and processed:", result);
+                    
+                    // Update mindmap if we got new data
+                    if (result.success && result.mindmapData) {
+                        currentMindmapData = result.mindmapData;
+                        renderMindmap(result.mindmapData);
+                        
+                        // Add to chat if visible
+                        const chatPanel = document.getElementById('chatPanel');
+                        if (!chatPanel.classList.contains('hidden') && result.transcript) {
+                            addChatMessage('user', result.transcript);
+                            if (result.message) {
+                                addChatMessage('ai', result.message, result.rawAiResponse);
+                            }
+                        }
+                        
+                        updateStatus("Academic content added", "success");
+                    } else if (result.success && result.filtered) {
+                        // Content was filtered out as non-academic
+                        updateStatus("Content filtered (non-academic)", "info");
+                        
+                        // Add to chat if visible to show what was filtered
+                        const chatPanel = document.getElementById('chatPanel');
+                        if (!chatPanel.classList.contains('hidden') && result.transcript) {
+                            addChatMessage('user', result.transcript);
+                            addChatMessage('ai', '🔍 ' + (result.message || 'Content filtered: no academic value detected'), result.rawAiResponse);
+                        }
+                    } else if (result.transcript && result.transcript.trim()) {
+                        updateStatus("Transcribed (no changes)", "info");
+                    } else {
+                        updateStatus("No speech detected", "info");
+                    }
+                    
+                    // Success - exit retry loop
+                    return;
+                    
+                } catch (err) {
+                    console.error(`❌ Upload attempt ${retryCount + 1} failed:`, err);
+                    retryCount++;
+                    
+                    if (retryCount < maxRetries) {
+                        // Wait before retrying (exponential backoff)
+                        const delay = Math.pow(2, retryCount) * 1000; // 2s, 4s, 8s
+                        console.log(`⏳ Retrying in ${delay/1000} seconds...`);
+                        updateStatus(`Upload failed, retrying in ${delay/1000}s...`, "error");
+                        
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                    } else {
+                        // All retries failed
+                        console.error("❌ All upload attempts failed:", err);
+                        updateStatus(`Upload failed: ${err.message}`, "error");
+                    }
                 }
-            } catch (error) {
-                console.error('Error processing audio:', error);
             }
         }
 
         function stopRecording() {
-            if (mediaRecorder && isRecording) {
-                mediaRecorder.stop();
-                clearInterval(recordingInterval);
-                isRecording = false;
-                document.getElementById('recordingControls').classList.add('hidden');
-                
-                // Stop all tracks
-                mediaRecorder.stream.getTracks().forEach(track => track.stop());
-            }
-        }
-
-        function toggleLogsPanel() {
-            const panel = document.getElementById('logsPanel');
-            const button = document.getElementById('toggleLogs');
+            isRecording = false;
             
-            if (panel.classList.contains('hidden')) {
-                panel.classList.remove('hidden');
-                button.textContent = 'Hide Logs';
-            } else {
-                panel.classList.add('hidden');
-                button.textContent = 'Show Logs';
+            // Clear recording timeout
+            if (recordingTimeout) {
+                clearTimeout(recordingTimeout);
+                recordingTimeout = null;
+            }
+            
+            // Stop media recorder
+            if (mediaRecorder && mediaRecorder.state === 'recording') {
+                mediaRecorder.stop();
+            }
+            
+            // Stop audio stream
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+                stream = null;
+            }
+            
+            // Update UI - Show/hide recording buttons
+            document.getElementById('recordingStatus').classList.add('hidden');
+            document.getElementById('startRecordingBtn').classList.remove('hidden');
+            document.getElementById('stopRecordingMainBtn').classList.add('hidden');
+            document.getElementById('continueRecordingBtn').classList.add('hidden');
+            
+            // Re-enable controls
+            document.getElementById('intervalInput').disabled = false;
+            
+            updateStatus('Recording stopped', 'info');
+            console.log('🎤 Stopped auto-recording');
+        }
+
+        function startDurationTimer() {
+            if (durationTimer) clearInterval(durationTimer);
+            
+            sessionStartTime = new Date();
+            const sessionStartTimeEl = document.getElementById('sessionStartTime');
+            if (sessionStartTimeEl) {
+                sessionStartTimeEl.textContent = sessionStartTime.toLocaleTimeString();
+            }
+            
+            durationTimer = setInterval(() => {
+                const now = new Date();
+                const duration = Math.floor((now - sessionStartTime) / 1000);
+                const minutes = Math.floor(duration / 60);
+                const seconds = duration % 60;
+                const sessionDurationEl = document.getElementById('sessionDuration');
+                if (sessionDurationEl) {
+                    sessionDurationEl.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+                }
+            }, 1000);
+        }
+
+        function stopDurationTimer() {
+            if (durationTimer) {
+                clearInterval(durationTimer);
+                durationTimer = null;
             }
         }
 
-        function displayLogs(logs) {
-            const container = document.getElementById('logsContainer');
-            container.innerHTML = '';
+        async function createMindmapSession(mainTopic) {
+            const sessionCode = 'MINDMAP-' + Math.floor(Math.random() * 10000);
+            const sessionResponse = await fetch('http://localhost:10000/api/mindmap/session', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    sessionCode, 
+                    mainTopic, 
+                    interval: 30000 
+                })
+            });
 
-            if (!logs || logs.length === 0) {
-                container.innerHTML = '<div class="text-gray-500 text-sm text-center py-8">No logs yet</div>';
+            if (!sessionResponse.ok) {
+                throw new Error('Failed to create session');
+            }
+
+            currentSession = { 
+                code: sessionCode, 
+                mainTopic,
+                startTime: new Date(),
+                nodeCount: 0,
+                speechCount: 0
+            };
+            
+            // Safe DOM updates with null checks
+            const sessionCodeEl = document.getElementById('sessionCode');
+            if (sessionCodeEl) sessionCodeEl.textContent = sessionCode;
+            
+            const currentTopicEl = document.getElementById('currentTopic');
+            if (currentTopicEl) currentTopicEl.textContent = mainTopic;
+            
+            const sessionInfoBar = document.getElementById('sessionInfoBar');
+            if (sessionInfoBar) sessionInfoBar.classList.remove('hidden');
+            
+            // Start duration timer
+            startDurationTimer();
+            
+            // Initialize mindmap with main topic as root
+            currentMindmapData = {
+                name: mainTopic,
+                children: []
+            };
+            
+            // Render initial mindmap with topic as root
+            renderMindmap(currentMindmapData);
+            
+            // Enable chat
+            const chatInput = document.getElementById('chatInput');
+            const sendBtn = document.getElementById('sendBtn');
+            if (chatInput) chatInput.disabled = false;
+            if (sendBtn) sendBtn.disabled = false;
+            
+            console.log('✅ Created mindmap session:', sessionCode, 'with topic:', mainTopic);
+        }
+
+        function recenterMindmap() {
+            if (currentMindmapData) {
+                // Re-render the mindmap which will auto-center it
+                renderMindmap(currentMindmapData);
+            }
+        }
+
+        function resetSession() {
+            if (!currentSession) {
+                showError('No active session to reset.');
                 return;
             }
 
-            logs.forEach(log => addLog(log));
-        }
+            const confirmed = window.confirm('Are you sure you want to reset this session? This will clear all current progress and start fresh with the same topic.');
+            if (!confirmed) return;
 
-        function addLog(log) {
-            const container = document.getElementById('logsContainer');
+            const mainTopic = currentSession.mainTopic;
             
-            // Remove "no logs" message
-            if (container.querySelector('.text-center')) {
-                container.innerHTML = '';
+            // Stop recording if active
+            if (isRecording) {
+                stopRecording();
             }
-
-            const logElement = document.createElement('div');
-            logElement.className = `p-3 rounded-lg border ${
-                log.type === 'ignored_chatter' ? 'bg-gray-50 border-gray-200' : 
-                'bg-blue-50 border-blue-200'
-            }`;
-
-            const time = new Date(log.created_at).toLocaleTimeString();
-            const actionIcon = log.ai_response?.action === 'ignore' ? 'eye-off' : 'plus-circle';
-            const actionColor = log.ai_response?.action === 'ignore' ? 'text-gray-600' : 'text-green-600';
-
-            logElement.innerHTML = `
-                <div class="flex items-start space-x-2">
-                    <i data-lucide="${actionIcon}" class="w-4 h-4 ${actionColor} mt-0.5 flex-shrink-0"></i>
-                    <div class="flex-1 min-w-0">
-                        <div class="text-xs text-gray-500 mb-1">${time}</div>
-                        <div class="text-sm text-gray-800 mb-2">"${log.content.substring(0, 100)}${log.content.length > 100 ? '...' : ''}"</div>
-                        <div class="text-xs ${actionColor}">${log.ai_response?.reason || 'Processed'}</div>
-                    </div>
+            
+            // Stop duration timer
+            stopDurationTimer();
+            
+            // Clear current session data
+            currentMindmapData = null;
+            chatHistory = [];
+            
+            // Reset UI state but keep the interface open
+            document.getElementById('chatMessages').innerHTML = `
+                <div class="text-center text-gray-500 py-8">
+                    <i data-lucide="message-square-plus" class="w-8 h-8 mx-auto mb-2 opacity-50"></i>
+                    <p class="text-sm">AI processing logs will appear here when you speak!</p>
                 </div>
             `;
-
-            container.insertBefore(logElement, container.firstChild);
             
-            // Limit to 50 logs
-            const logs = container.querySelectorAll('div.p-3');
-            if (logs.length > 50) {
-                logs[logs.length - 1].remove();
-            }
-
-            // Re-initialize Lucide icons
+            // Create new session with same topic
+            createMindmapSession(mainTopic);
+            
             lucide.createIcons();
         }
 
-        function clearLogs() {
-            document.getElementById('logsContainer').innerHTML = 
-                '<div class="text-gray-500 text-sm text-center py-8">No logs yet</div>';
+        async function saveSession() {
+            if (!currentSession || !currentMindmapData) {
+                showError('No active session to save.');
+                return;
+            }
+
+            try {
+                // Calculate session duration
+                const duration = sessionStartTime ? 
+                    Math.floor((new Date() - sessionStartTime) / 1000) : 0;
+                
+                // Count nodes in mindmap
+                const nodeCount = countNodes(currentMindmapData);
+                
+                // Prepare session metadata
+                const sessionMetadata = {
+                    sessionCode: currentSession.code,
+                    mainTopic: currentSession.mainTopic,
+                    startTime: sessionStartTime?.toISOString() || new Date().toISOString(),
+                    endTime: new Date().toISOString(),
+                    duration: duration,
+                    durationFormatted: formatDuration(duration),
+                    nodeCount: nodeCount,
+                    speechInputs: currentSession.speechCount || 0,
+                    mindmapData: currentMindmapData,
+                    chatHistory: chatHistory,
+                    version: "1.0",
+                    savedAt: new Date().toISOString()
+                };
+
+                // Save to backend database
+                const saveResponse = await fetch('http://localhost:10000/api/mindmap/save', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(sessionMetadata)
+                });
+
+                if (saveResponse.ok) {
+                    // Also download as JSON file
+                    const jsonData = JSON.stringify(sessionMetadata, null, 2);
+                    const blob = new Blob([jsonData], { type: 'application/json' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `mindmap_${currentSession.mainTopic.replace(/[^a-zA-Z0-9]/g, '_')}_${new Date().toISOString().split('T')[0]}.json`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+
+                    // Show success message
+                    addChatMessage('ai', `✅ Session saved successfully! Duration: ${formatDuration(duration)}, Nodes: ${nodeCount}`, null);
+                } else {
+                    throw new Error('Failed to save to server');
+                }
+
+            } catch (error) {
+                console.error('❌ Error saving session:', error);
+                
+                // Fallback: just download the file
+                const sessionMetadata = {
+                    sessionCode: currentSession.code,
+                    mainTopic: currentSession.mainTopic,
+                    startTime: sessionStartTime?.toISOString() || new Date().toISOString(),
+                    duration: sessionStartTime ? Math.floor((new Date() - sessionStartTime) / 1000) : 0,
+                    mindmapData: currentMindmapData,
+                    chatHistory: chatHistory,
+                    savedAt: new Date().toISOString(),
+                    note: "Saved locally due to server error"
+                };
+
+                const jsonData = JSON.stringify(sessionMetadata, null, 2);
+                const blob = new Blob([jsonData], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `mindmap_${currentSession.mainTopic.replace(/[^a-zA-Z0-9]/g, '_')}_${new Date().toISOString().split('T')[0]}.json`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+
+                showError('Session saved locally, but could not sync with server: ' + error.message);
+            }
         }
 
-        // Auto-refresh mindmap data every 30 seconds
-        setInterval(() => {
-            if (currentSession && !isRecording) {
-                loadMindmapData();
+        function countNodes(node) {
+            if (!node) return 0;
+            let count = 1; // Count current node
+            if (node.children) {
+                node.children.forEach(child => {
+                    count += countNodes(child);
+                });
             }
-        }, 30000);
+            return count;
+        }
+
+        function formatDuration(seconds) {
+            const hours = Math.floor(seconds / 3600);
+            const minutes = Math.floor((seconds % 3600) / 60);
+            const secs = seconds % 60;
+            
+            if (hours > 0) {
+                return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+            }
+            return `${minutes}:${secs.toString().padStart(2, '0')}`;
+        }
+
+        async function processSpeechText(text) {
+            if (!text || !currentSession) {
+                return;
+            }
+
+            try {
+                console.log('🧠 Processing speech:', text);
+                
+                // Increment speech count
+                currentSession.speechCount = (currentSession.speechCount || 0) + 1;
+                
+                // Show processing in chat if visible
+                const chatPanel = document.getElementById('chatPanel');
+                if (!chatPanel.classList.contains('hidden')) {
+                    addChatMessage('user', text);
+                    var thinkingId = addChatMessage('ai', 'Processing speech and updating mindmap...', null, true);
+                }
+
+                let response, result;
+
+                // If this is the first speech input, generate initial mindmap
+                if (!currentMindmapData || currentMindmapData.children.length === 0) {
+                    response = await fetch('http://localhost:10000/api/mindmap/generate', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ 
+                            sessionCode: currentSession.code, 
+                            text: text 
+                        })
+                    });
+                } else {
+                    // Expand existing mindmap
+                    response = await fetch('http://localhost:10000/api/mindmap/expand', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ 
+                            sessionCode: currentSession.code, 
+                            text: text 
+                        })
+                    });
+                }
+
+                result = await response.json();
+                
+                // Remove thinking indicator if chat is visible
+                if (!chatPanel.classList.contains('hidden')) {
+                    const thinkingEl = document.getElementById(thinkingId);
+                    if (thinkingEl) thinkingEl.remove();
+                }
+
+                if (!response.ok) {
+                    throw new Error(result.error || 'Failed to process speech');
+                }
+
+                // Update current mindmap data
+                currentMindmapData = result.data;
+
+                // Re-render mindmap
+                renderMindmap(result.data);
+
+                // Add AI response to chat if visible
+                if (!chatPanel.classList.contains('hidden')) {
+                    addChatMessage('ai', result.message || 'Mindmap updated successfully!', result.rawAiResponse);
+                }
+
+                console.log('✅ Successfully processed speech and updated mindmap');
+
+            } catch (error) {
+                console.error('❌ Error processing speech:', error);
+                if (!document.getElementById('chatPanel').classList.contains('hidden')) {
+                    addChatMessage('ai', 'Sorry, I encountered an error while processing your speech: ' + error.message, null);
+                }
+            }
+        }
+
+        function toggleTestSection() {
+            const testSection = document.getElementById('testDataSection');
+            const toggleBtn = document.getElementById('toggleTestBtn');
+            
+            if (testSection.classList.contains('hidden')) {
+                testSection.classList.remove('hidden');
+                toggleBtn.innerHTML = '<i data-lucide="settings" class="w-4 h-4 mr-2"></i>Hide Test Options';
+                loadTestData(); // Pre-populate with test data
+            } else {
+                testSection.classList.add('hidden');
+                toggleBtn.innerHTML = '<i data-lucide="settings" class="w-4 h-4 mr-2"></i>Show Test Options';
+            }
+            lucide.createIcons();
+        }
+
+        function toggleChatPanel() {
+            const chatPanel = document.getElementById('chatPanel');
+            const toggleBtn = document.getElementById('toggleChatBtn');
+            
+            if (chatPanel.classList.contains('hidden')) {
+                chatPanel.classList.remove('hidden');
+                toggleBtn.innerHTML = '<i data-lucide="message-circle" class="w-4 h-4 mr-2"></i>Hide AI Chat';
+            } else {
+                chatPanel.classList.add('hidden');
+                toggleBtn.innerHTML = '<i data-lucide="message-circle" class="w-4 h-4 mr-2"></i>Show AI Chat';
+            }
+            lucide.createIcons();
+        }
+
+        function hideChatPanel() {
+            const chatPanel = document.getElementById('chatPanel');
+            const toggleBtn = document.getElementById('toggleChatBtn');
+            
+            chatPanel.classList.add('hidden');
+            toggleBtn.innerHTML = '<i data-lucide="message-circle" class="w-4 h-4 mr-2"></i>Show AI Chat';
+            lucide.createIcons();
+        }
+
+        function loadTestData() {
+            document.getElementById('mainTopicInput').value = 'Amazing World of Cats';
+            document.getElementById('initialTextInput').value = `Cats are truly remarkable creatures with extraordinary sensory abilities. They possess a third eyelid called the nictitating membrane that provides additional protection for their eyes. Their ears are incredibly flexible and can rotate up to 180 degrees, allowing them to pinpoint sounds with amazing accuracy. Most fascinating of all, cats have a special scent organ called the Jacobson's organ located in the roof of their mouth, which helps them analyze chemical information from their environment.
+
+The behavioral patterns of cats are equally impressive. They spend approximately 70% of their lives sleeping, which equals 13 to 16 hours a day. This extensive sleeping helps them conserve energy for hunting activities. Cats are also incredibly vocal animals, capable of producing over 100 different sounds to communicate with humans and other cats. A group of cats is called a 'clowder,' and they use a complex system of body language, vocalizations, and scent marking to communicate.`;
+        }
+
+        function clearAll() {
+            // Stop recording if active
+            if (isRecording) {
+                stopRecording();
+            }
+            
+            // Stop duration timer
+            stopDurationTimer();
+            
+            document.getElementById('mainTopicInput').value = '';
+            document.getElementById('initialTextInput').value = '';
+            document.getElementById('setupSection').classList.remove('hidden');
+            document.getElementById('mindmapInterface').classList.add('hidden');
+            document.getElementById('recordingStatus').classList.add('hidden');
+            document.getElementById('continueRecordingBtn').classList.add('hidden');
+            document.getElementById('chatPanel').classList.add('hidden');
+            document.getElementById('testDataSection').classList.add('hidden');
+            document.getElementById('sessionInfoBar').classList.add('hidden');
+            
+            // Reset recording UI - Show start button, hide stop button
+            document.getElementById('startRecordingBtn').classList.remove('hidden');
+            document.getElementById('stopRecordingMainBtn').classList.add('hidden');
+            document.getElementById('intervalInput').disabled = false;
+            document.getElementById('intervalInput').value = '10';
+            updateInterval(); // Update the interval display
+            
+            // Reset chat
+            document.getElementById('chatMessages').innerHTML = `
+                <div class="text-center text-gray-500 py-8">
+                    <i data-lucide="message-square-plus" class="w-8 h-8 mx-auto mb-2 opacity-50"></i>
+                    <p class="text-sm">AI processing logs will appear here when you speak!</p>
+                </div>
+            `;
+            
+            // Reset button text
+            document.getElementById('toggleChatBtn').innerHTML = '<i data-lucide="message-circle" class="w-4 h-4 mr-2"></i>Show AI Chat';
+            document.getElementById('toggleTestBtn').innerHTML = '<i data-lucide="settings" class="w-4 h-4 mr-2"></i>Show Test Options';
+            
+            // Reset session data
+            currentSession = null;
+            currentMindmapData = null;
+            chatHistory = [];
+            sessionStartTime = null;
+            
+            // Reset recording state
+            stream = null;
+            recordingTimeout = null;
+            
+            document.getElementById('chatInput').disabled = true;
+            document.getElementById('sendBtn').disabled = true;
+            updateStatus('Ready', 'info');
+            lucide.createIcons();
+        }
+
+        async function generateInitialMindmap() {
+            const mainTopic = document.getElementById('mainTopicInput').value.trim();
+            const initialText = document.getElementById('initialTextInput').value.trim();
+            const generateBtn = document.getElementById('generateBtn');
+            const loadingIndicator = document.getElementById('loadingIndicator');
+            const errorMessage = document.getElementById('errorMessage');
+
+            if (!mainTopic || !initialText) {
+                showError('Please enter both a main topic and initial text.');
+                return;
+            }
+
+            try {
+                // Show loading state
+                generateBtn.disabled = true;
+                loadingIndicator.classList.remove('hidden');
+                errorMessage.classList.add('hidden');
+
+                // Create session
+                const sessionCode = 'MINDMAP-' + Math.floor(Math.random() * 10000);
+                const sessionResponse = await fetch('http://localhost:10000/api/mindmap/session', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        sessionCode, 
+                        mainTopic, 
+                        interval: 30000 
+                    })
+                });
+
+                if (!sessionResponse.ok) {
+                    throw new Error('Failed to create session');
+                }
+
+                // Generate initial mindmap
+                const generateResponse = await fetch('http://localhost:10000/api/mindmap/generate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        sessionCode, 
+                        text: initialText 
+                    })
+                });
+
+                const result = await generateResponse.json();
+                if (!generateResponse.ok) {
+                    throw new Error(result.error || 'Failed to generate mindmap');
+                }
+
+                // Set current session data
+                currentSession = { code: sessionCode, mainTopic };
+                currentMindmapData = result.data;
+                document.getElementById('sessionCode').textContent = sessionCode;
+
+                // Show mindmap interface
+                document.getElementById('setupSection').classList.add('hidden');
+                document.getElementById('mindmapInterface').classList.remove('hidden');
+
+                // Render mindmap
+                setTimeout(() => {
+                    renderMindmap(result.data);
+                }, 100);
+
+                // Enable chat and add initial messages
+                document.getElementById('chatInput').disabled = false;
+                document.getElementById('sendBtn').disabled = false;
+                
+                // Clear chat and add initial messages
+                const chatMessages = document.getElementById('chatMessages');
+                chatMessages.innerHTML = '';
+                
+                addChatMessage('user', initialText);
+                addChatMessage('ai', 'Initial mindmap generated! You can now add more information using the chat below.', null);
+
+            } catch (error) {
+                console.error('Error generating mindmap:', error);
+                showError('Failed to generate mindmap: ' + error.message);
+            } finally {
+                generateBtn.disabled = false;
+                loadingIndicator.classList.add('hidden');
+            }
+        }
+
+        async function addToMindmap() {
+            const chatInput = document.getElementById('chatInput');
+            const sendBtn = document.getElementById('sendBtn');
+            const text = chatInput.value.trim();
+
+            if (!text || !currentSession) {
+                return;
+            }
+
+            try {
+                // Disable input during processing
+                sendBtn.disabled = true;
+                chatInput.disabled = true;
+
+                // Add user message to chat
+                addChatMessage('user', text);
+
+                // Show thinking indicator
+                const thinkingId = addChatMessage('ai', 'Analyzing and updating mindmap...', null, true);
+
+                // Send to API
+                const response = await fetch('http://localhost:10000/api/mindmap/expand', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        sessionCode: currentSession.code, 
+                        text: text 
+                    })
+                });
+
+                const result = await response.json();
+                
+                // Remove thinking indicator
+                document.getElementById(thinkingId).remove();
+
+                if (!response.ok) {
+                    throw new Error(result.error || 'Failed to expand mindmap');
+                }
+
+                // Update current mindmap data
+                currentMindmapData = result.data;
+
+                // Re-render mindmap
+                renderMindmap(result.data);
+
+                // Add AI response to chat with collapsible raw output
+                addChatMessage('ai', result.message, result.rawAiResponse);
+
+                // Clear input
+                chatInput.value = '';
+
+            } catch (error) {
+                console.error('Error expanding mindmap:', error);
+                addChatMessage('ai', 'Sorry, I encountered an error while updating the mindmap: ' + error.message, null);
+            } finally {
+                sendBtn.disabled = false;
+                chatInput.disabled = false;
+                chatInput.focus();
+            }
+        }
+
+        function addChatMessage(type, content, rawResponse = null, isTemporary = false) {
+            const chatMessages = document.getElementById('chatMessages');
+            const messageId = 'msg-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+            
+            const messageEl = document.createElement('div');
+            messageEl.id = messageId;
+            messageEl.className = `chat-message ${type}`;
+            
+            let html = `<div>${content}</div>`;
+            
+            // Add collapsible raw response if provided
+            if (rawResponse && type === 'ai') {
+                const collapsibleId = 'collapse-' + messageId;
+                html += `
+                    <div class="collapsible-response">
+                        <div class="collapsible-header" onclick="toggleCollapsible('${collapsibleId}')">
+                            <span>🤖 Raw AI Response</span>
+                            <i data-lucide="chevron-down" class="w-4 h-4 ml-auto transition-transform" id="chevron-${collapsibleId}"></i>
+                        </div>
+                        <div class="collapsible-content" id="${collapsibleId}">
+                            ${escapeHtml(rawResponse)}
+                        </div>
+                    </div>
+                `;
+            }
+            
+            messageEl.innerHTML = html;
+            chatMessages.appendChild(messageEl);
+            
+            // Re-initialize icons
+            lucide.createIcons();
+            
+            // Scroll to bottom
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+            
+            return messageId;
+        }
+
+        function toggleCollapsible(id) {
+            const content = document.getElementById(id);
+            const chevron = document.getElementById('chevron-' + id);
+            
+            if (content.classList.contains('expanded')) {
+                content.classList.remove('expanded');
+                chevron.style.transform = 'rotate(0deg)';
+            } else {
+                content.classList.add('expanded');
+                chevron.style.transform = 'rotate(180deg)';
+            }
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML.replace(/\n/g, '<br>');
+        }
+
+        function renderMindmap(data) {
+            console.log('Rendering mindmap:', data);
+            
+            if (!data) {
+                console.error('No data to render');
+                return;
+            }
+
+            const container = document.getElementById('mindmapContainer');
+            const width = container.clientWidth;
+            const height = container.clientHeight;
+
+            // Clear existing content
+            container.innerHTML = '';
+
+            // Create SVG
+            const svg = d3.select(container)
+                .append('svg')
+                .attr('width', width)
+                .attr('height', height);
+
+            // Create zoom behavior
+            const zoom = d3.zoom()
+                .scaleExtent([0.1, 3])
+                .on('zoom', (event) => {
+                    svg.select('g').attr('transform', event.transform);
+                });
+
+            svg.call(zoom);
+
+            // Create main group
+            const g = svg.append('g');
+
+            // Create hierarchical layout
+            const tree = d3.tree().size([height - 100, width - 200]);
+            const root = d3.hierarchy(data);
+            
+            // Assign positions
+            tree(root);
+
+            // Create links
+            const link = g.selectAll('.link')
+                .data(root.links())
+                .enter().append('path')
+                .attr('class', 'link')
+                .attr('d', d3.linkHorizontal()
+                    .x(d => d.y + 100)
+                    .y(d => d.x));
+
+            // Create nodes
+            const node = g.selectAll('.node')
+                .data(root.descendants())
+                .enter().append('g')
+                .attr('class', 'node')
+                .attr('transform', d => `translate(${d.y + 100},${d.x})`);
+
+            // Add circles to nodes
+            node.append('circle')
+                .attr('r', d => d.children ? 8 : 6)
+                .style('fill', d => {
+                    if (d.depth === 0) return '#667eea'; // Root - blue
+                    if (d.depth === 1) return '#10b981'; // Main topics - green
+                    if (d.depth === 2) return '#f59e0b'; // Details - yellow
+                    return '#ef4444'; // Deep details - red
+                })
+                .style('stroke', '#fff')
+                .style('stroke-width', 2);
+
+            // Add text labels with wrapping
+            node.each(function(d) {
+                const nodeGroup = d3.select(this);
+                const words = d.data.name.split(' ');
+                const maxCharsPerLine = d.children ? 20 : 25;
+                const lines = [];
+                let currentLine = '';
+
+                words.forEach(word => {
+                    if ((currentLine + word).length <= maxCharsPerLine) {
+                        currentLine += (currentLine ? ' ' : '') + word;
+                    } else {
+                        if (currentLine) lines.push(currentLine);
+                        currentLine = word;
+                    }
+                });
+                if (currentLine) lines.push(currentLine);
+
+                // Limit to 2 lines
+                const displayLines = lines.slice(0, 2);
+                if (lines.length > 2) {
+                    displayLines[1] = displayLines[1].slice(0, -3) + '...';
+                }
+
+                displayLines.forEach((line, i) => {
+                    nodeGroup.append('text')
+                        .attr('dy', d.children ? -20 + (i * 12) : 3 + (i * 12))
+                        .attr('x', d.children ? 0 : 12)
+                        .attr('text-anchor', d.children ? 'middle' : 'start')
+                        .style('font-size', d.children ? '12px' : '11px')
+                        .style('font-weight', d.children ? 'bold' : 'normal')
+                        .style('fill', '#1e293b')
+                        .text(line);
+                });
+            });
+
+            // Center the visualization
+            try {
+                const bounds = g.node().getBBox();
+                const fullWidth = container.clientWidth;
+                const fullHeight = container.clientHeight;
+                
+                const widthScale = (fullWidth * 0.9) / bounds.width;
+                const heightScale = (fullHeight * 0.9) / bounds.height;
+                const scale = Math.min(widthScale, heightScale, 1);
+                
+                const transform = d3.zoomIdentity
+                    .translate(
+                        fullWidth / 2 - bounds.x * scale - bounds.width * scale / 2,
+                        fullHeight / 2 - bounds.y * scale - bounds.height * scale / 2
+                    )
+                    .scale(scale);
+
+                svg.call(zoom.transform, transform);
+                
+            } catch (error) {
+                console.error('Error centering mindmap:', error);
+                // Fallback centering
+                const transform = d3.zoomIdentity
+                    .translate(width / 2, height / 2)
+                    .scale(0.8);
+                svg.call(zoom.transform, transform);
+            }
+        }
+
+        function showError(message) {
+            const errorMessage = document.getElementById('errorMessage');
+            errorMessage.textContent = message;
+            errorMessage.classList.remove('hidden');
+        }
+
+        function setupSpeechRecognition() {
+            if ('webkitSpeechRecognition' in window) {
+                recognition = new webkitSpeechRecognition();
+                recognition.continuous = true;
+                recognition.interimResults = false;
+                recognition.lang = 'en-US';
+                
+                recognition.onstart = function() {
+                    console.log('🎤 Speech recognition started');
+                };
+                
+                recognition.onresult = function(event) {
+                    console.log('🎤 Speech recognition result received');
+                    const transcript = event.results[event.results.length - 1][0].transcript;
+                    console.log('📝 Transcript:', transcript);
+                    processSpeechText(transcript.trim());
+                };
+                
+                recognition.onerror = function(event) {
+                    console.error('🎤 Speech recognition error:', event.error);
+                    showError('Speech recognition error: ' + event.error);
+                };
+                
+                recognition.onend = function() {
+                    console.log('🎤 Speech recognition ended');
+                    if (isRecording) {
+                        // Restart recognition if we're still supposed to be recording
+                        setTimeout(() => {
+                            if (isRecording) {
+                                recognition.start();
+                            }
+                        }, 100);
+                    }
+                };
+            } else if ('SpeechRecognition' in window) {
+                recognition = new SpeechRecognition();
+                // Same setup as above...
+            } else {
+                console.warn('Speech recognition not supported');
+            }
+        }
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            if (currentMindmapData) {
+                clearTimeout(window.resizeTimeout);
+                window.resizeTimeout = setTimeout(() => {
+                    renderMindmap(currentMindmapData);
+                }, 250);
+            }
+        });
     </script>
 </body>
 </html> 
