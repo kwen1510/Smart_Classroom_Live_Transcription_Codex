@@ -328,6 +328,24 @@
                 max-width: 120px;
             }
         }
+        
+        /* Prevent input overflow on narrow screens */
+        #mainTopicInput {
+            min-width: 0;         /* allow flex parents to shrink */
+            max-width: 100%;      /* never exceed container */
+            box-sizing: border-box;
+        }
+        .input-row {
+            display: flex;
+            gap: 0.75rem;
+            align-items: stretch;
+            flex-wrap: wrap;      /* controls wrap for small screens */
+            min-width: 0;         /* enable children to shrink */
+        }
+        .input-col {
+            flex: 1 1 320px;      /* grow, shrink, base width */
+            min-width: 0;         /* allow input to shrink within */
+        }
     </style>
 </head>
 <body class="bg-gray-50 font-sans">
@@ -385,14 +403,18 @@
             <div class="space-y-4">
                 <div>
                     <label for="mainTopicInput" class="block text-sm font-semibold text-gray-700 mb-2">Main Topic</label>
-                    <input 
-                        id="mainTopicInput" 
-                        type="text" 
-                        class="w-full px-3 sm:px-4 py-2 sm:py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm sm:text-base min-w-0"
-                        placeholder="Enter the main topic for your mindmap..."
-                        value=""
-                    >
-                </div>
+                    <div class="input-row">
+                        <div class="input-col">
+                            <input 
+                                id="mainTopicInput" 
+                                type="text" 
+                                class="w-full px-3 sm:px-4 py-2 sm:py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm sm:text-base"
+                                placeholder="Enter the main topic for your mindmap..."
+                                value=""
+                            >
+                        </div>
+                    </div>
+                 </div>
                 
                 <!-- Hidden test data section -->
                 <div id="testDataSection" class="hidden">
