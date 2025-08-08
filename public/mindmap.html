@@ -49,13 +49,18 @@
         }
         
         .node circle {
-            cursor: pointer;
+            cursor: grab;
             transition: all 0.3s ease;
         }
         
         .node circle:hover {
             stroke-width: 3px;
             filter: brightness(1.1);
+            transform: scale(1.05);
+        }
+        
+        .node:active circle {
+            cursor: grabbing;
         }
         
         .node text {
@@ -67,6 +72,21 @@
         .text-tooltip {
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
             line-height: 1.4;
+        }
+        
+        /* Improve text readability */
+        .node text {
+            text-shadow: 0 1px 2px rgba(255, 255, 255, 0.8);
+        }
+        
+        /* Better drag feedback */
+        .node.dragging {
+            opacity: 0.8;
+        }
+        
+        .node.dragging circle {
+            stroke-width: 4px;
+            filter: drop-shadow(0 4px 8px rgba(0,0,0,0.2));
         }
         
         /* Chat Styles */
@@ -154,6 +174,53 @@
             -webkit-tap-highlight-color: transparent;
         }
         
+        /* Mobile responsive improvements */
+        @media (max-width: 640px) {
+            .mindmap-container {
+                height: 300px !important;
+                min-height: 300px !important;
+            }
+            
+            #chatPanel {
+                height: 350px !important;
+                min-height: 350px !important;
+            }
+            
+            /* Better touch targets on mobile */
+            .node circle {
+                r: 8px;
+                stroke-width: 3px;
+            }
+            
+            .node text {
+                font-size: 13px !important;
+            }
+        }
+        
+        @media (min-width: 641px) and (max-width: 1024px) {
+            .mindmap-container {
+                height: 450px !important;
+                min-height: 450px !important;
+            }
+            
+            #chatPanel {
+                height: 450px !important;
+                min-height: 450px !important;
+            }
+        }
+        
+        @media (min-width: 1025px) {
+            .mindmap-container {
+                height: 600px !important;
+                min-height: 600px !important;
+            }
+            
+            #chatPanel {
+                height: 600px !important;
+                min-height: 600px !important;
+            }
+        }
+        
         /* Scrollbar styling */
         .custom-scroll::-webkit-scrollbar {
             width: 6px;
@@ -172,39 +239,147 @@
         .custom-scroll::-webkit-scrollbar-thumb:hover {
             background: #94a3b8;
         }
+        
+        /* Responsive navigation fixes */
+        .mode-navigation {
+            overflow-x: auto;
+            scrollbar-width: none;
+            -ms-overflow-style: none;
+        }
+        .mode-navigation::-webkit-scrollbar {
+            display: none;
+        }
+        
+        .mode-btn {
+            white-space: nowrap;
+            flex-shrink: 0;
+            min-width: fit-content;
+        }
+        
+        /* Ensure header doesn't overflow */
+        .header-content {
+            min-width: 0;
+            overflow: hidden;
+        }
+        
+        /* Better responsive navigation */
+        @media (max-width: 768px) {
+            .mode-navigation {
+                min-width: 0;
+                flex: 1;
+            }
+            
+            .mode-btn {
+                padding: 0.5rem 0.75rem;
+                font-size: 0.75rem;
+                min-width: auto;
+                flex: 1;
+            }
+            
+            .mode-btn span {
+                display: none;
+            }
+            
+            .mode-btn i {
+                margin-right: 0;
+                width: 1rem;
+                height: 1rem;
+            }
+            
+            /* Make header more compact on mobile */
+            .header-title {
+                font-size: 1.25rem;
+            }
+            
+            .header-subtitle {
+                font-size: 0.75rem;
+            }
+        }
+        
+        @media (max-width: 640px) {
+            .header-nav-container {
+                flex-direction: column;
+                gap: 0.75rem;
+                align-items: stretch;
+            }
+            
+            .mode-navigation {
+                width: 100%;
+                justify-content: space-between;
+            }
+            
+            .mode-btn {
+                flex: 1;
+                justify-content: center;
+                padding: 0.75rem 0.5rem;
+            }
+        }
+        
+        /* Prevent text overflow in titles */
+        .truncate-text {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            max-width: 200px;
+        }
+        
+        @media (max-width: 480px) {
+            .truncate-text {
+                max-width: 120px;
+            }
+        }
     </style>
 </head>
 <body class="bg-gray-50 font-sans">
     <!-- Header -->  
     <header class="gradient-bg text-white shadow-xl">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-            <div class="flex items-center justify-between">
-                <div class="flex items-center space-x-4">
-                    <div class="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center backdrop-blur-sm">
-                        <i data-lucide="brain-circuit" class="w-6 h-6 text-white"></i>
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 sm:py-4">
+            <div class="flex items-center justify-between header-content header-nav-container">
+                <div class="flex items-center space-x-3 sm:space-x-4 min-w-0 flex-shrink">
+                    <div class="w-8 h-8 sm:w-10 sm:h-10 bg-white/20 rounded-xl flex items-center justify-center backdrop-blur-sm flex-shrink-0">
+                        <i data-lucide="brain-circuit" class="w-5 h-5 sm:w-6 sm:h-6 text-white"></i>
                     </div>
-                    <div>
-                        <h1 class="text-xl font-bold">🧠 AI Mindmap Mode</h1>
-                        <p class="text-white/80 text-sm">Session: <span id="sessionCode" class="font-mono font-semibold">-</span></p>
+                    <div class="min-w-0">
+                        <h1 class="header-title text-lg sm:text-xl font-bold truncate-text">🧠 AI Mindmap Mode</h1>
+                        <p class="header-subtitle text-white/80 text-xs sm:text-sm">Session: <span id="sessionCode" class="font-mono font-semibold">-</span></p>
                     </div>
                 </div>
-                <div class="flex items-center space-x-3">
-                    <a href="admin.html" class="bg-white/20 backdrop-blur-sm px-4 py-2 rounded-lg text-sm font-medium hover:bg-white/30 transition-colors touch-friendly">
-                        <i data-lucide="arrow-left" class="w-4 h-4 mr-2"></i>
-                        Back to Admin
-                    </a>
+                <div class="flex items-center space-x-2 sm:space-x-3 flex-shrink-0">
+                    <span class="text-sm text-white/80 hidden lg:inline">Modes:</span>
+                    <div class="flex bg-white/10 rounded-lg p-1 mode-navigation">
+                        <a href="/admin.html" class="mode-btn text-white/80 hover:bg-white/20 hover:text-white px-2 sm:px-3 py-2 rounded text-xs sm:text-sm font-medium transition-colors flex items-center justify-center">
+                            <i data-lucide="message-square" class="w-3 h-3 sm:w-4 sm:h-4 mr-1 sm:mr-2 flex-shrink-0"></i>
+                            <span class="truncate">Summary</span>
+                        </a>
+                        <button class="mode-btn bg-white/20 text-white px-2 sm:px-3 py-2 rounded text-xs sm:text-sm font-medium transition-colors flex items-center justify-center">
+                            <i data-lucide="brain-circuit" class="w-3 h-3 sm:w-4 sm:h-4 mr-1 sm:mr-2 flex-shrink-0"></i>
+                            <span class="truncate">Mindmap</span>
+                        </button>
+                        <a href="/checkbox.html" class="mode-btn text-white/80 hover:bg-white/20 hover:text-white px-2 sm:px-3 py-2 rounded text-xs sm:text-sm font-medium transition-colors flex items-center justify-center">
+                            <i data-lucide="check-square" class="w-3 h-3 sm:w-4 sm:h-4 mr-1 sm:mr-2 flex-shrink-0"></i>
+                            <span class="truncate">Checkbox</span>
+                        </a>
+                        <a href="/data.html" class="mode-btn text-white/80 hover:bg-white/20 hover:text-white px-2 sm:px-3 py-2 rounded text-xs sm:text-sm font-medium transition-colors flex items-center justify-center">
+                            <i data-lucide="database" class="w-3 h-3 sm:w-4 sm:h-4 mr-1 sm:mr-2 flex-shrink-0"></i>
+                            <span class="truncate">Data</span>
+                        </a>
+                        <a href="/prompts.html" class="mode-btn text-white/80 hover:bg-white/20 hover:text-white px-2 sm:px-3 py-2 rounded text-xs sm:text-sm font-medium transition-colors flex items-center justify-center">
+                            <i data-lucide="file-text" class="w-3 h-3 sm:w-4 sm:h-4 mr-1 sm:mr-2 flex-shrink-0"></i>
+                            <span class="truncate">Prompts</span>
+                        </a>
+                    </div>
                 </div>
             </div>
         </div>
     </header>
 
     <!-- Main Content -->
-    <div class="max-w-7xl mx-auto p-4 sm:p-6">
+    <div class="max-w-7xl mx-auto p-2 sm:p-4 lg:p-6">
         <!-- Initial Setup Section -->
-        <div id="setupSection" class="bg-white rounded-xl shadow-lg border border-gray-200 p-6 mb-6">
-            <div class="text-center mb-6">
-                <h2 class="text-2xl font-bold text-gray-900 mb-2">🧠 AI Mindmap Generator</h2>
-                <p class="text-gray-600">Transform your speech into beautiful, interactive mindmaps using AI</p>
+        <div id="setupSection" class="bg-white rounded-xl shadow-lg border border-gray-200 p-4 sm:p-6 mb-4 sm:mb-6">
+            <div class="text-center mb-4 sm:mb-6">
+                <h2 class="text-xl sm:text-2xl font-bold text-gray-900 mb-2">🧠 AI Mindmap Generator</h2>
+                <p class="text-sm sm:text-base text-gray-600">Transform your speech into beautiful, interactive mindmaps using AI</p>
             </div>
             
             <div class="space-y-4">
@@ -213,7 +388,7 @@
                     <input 
                         id="mainTopicInput" 
                         type="text" 
-                        class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-base"
+                        class="w-full px-3 sm:px-4 py-2 sm:py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm sm:text-base min-w-0"
                         placeholder="Enter the main topic for your mindmap..."
                         value=""
                     >
@@ -260,37 +435,41 @@
                 <div class="flex flex-col sm:flex-row gap-3">
                     <button 
                         id="startRecordingBtn" 
-                        class="flex-1 bg-gradient-to-r from-green-600 to-blue-600 text-white px-6 py-3 rounded-lg hover:from-green-700 hover:to-blue-700 transition-all duration-200 flex items-center justify-center text-base font-semibold shadow-lg hover:shadow-xl touch-friendly"
+                        class="flex-1 bg-gradient-to-r from-green-600 to-blue-600 text-white px-4 sm:px-6 py-3 rounded-lg hover:from-green-700 hover:to-blue-700 transition-all duration-200 flex items-center justify-center text-sm sm:text-base font-semibold shadow-lg hover:shadow-xl touch-friendly"
                     >
-                        <i data-lucide="mic" class="w-5 h-5 mr-2"></i>
-                        🎤 Start Auto-Recording
+                        <i data-lucide="mic" class="w-4 sm:w-5 h-4 sm:h-5 mr-2"></i>
+                        <span class="hidden sm:inline">🎤 Start Auto-Recording</span>
+                        <span class="sm:hidden">🎤 Start Recording</span>
                     </button>
                     <button 
                         id="stopRecordingMainBtn"
-                        class="hidden flex-1 bg-gradient-to-r from-red-600 to-red-700 text-white px-6 py-3 rounded-lg hover:from-red-700 hover:to-red-800 transition-all duration-200 flex items-center justify-center text-base font-semibold shadow-lg hover:shadow-xl touch-friendly"
+                        class="hidden flex-1 bg-gradient-to-r from-red-600 to-red-700 text-white px-4 sm:px-6 py-3 rounded-lg hover:from-red-700 hover:to-red-800 transition-all duration-200 flex items-center justify-center text-sm sm:text-base font-semibold shadow-lg hover:shadow-xl touch-friendly"
                     >
-                        <i data-lucide="square" class="w-5 h-5 mr-2"></i>
-                        🛑 Stop Recording
+                        <i data-lucide="square" class="w-4 sm:w-5 h-4 sm:h-5 mr-2"></i>
+                        <span>🛑 Stop Recording</span>
                     </button>
-                    <div class="flex items-center space-x-2">
-                        <label for="intervalInput" class="text-sm font-medium text-gray-700 whitespace-nowrap">Interval:</label>
-                        <input 
-                            id="intervalInput" 
-                            type="number" 
-                            min="5" 
-                            max="60" 
-                            value="10" 
-                            class="w-20 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                    <div class="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-2">
+                        <div class="flex items-center space-x-2">
+                            <label for="intervalInput" class="text-xs sm:text-sm font-medium text-gray-700 whitespace-nowrap">Interval:</label>
+                            <input 
+                                id="intervalInput" 
+                                type="number" 
+                                min="5" 
+                                max="60" 
+                                value="10" 
+                                class="w-16 sm:w-20 px-2 sm:px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-xs sm:text-sm"
+                            >
+                            <span class="text-xs sm:text-sm text-gray-600">sec</span>
+                        </div>
+                        <button 
+                            id="toggleTestBtn" 
+                            class="bg-gray-500 text-white px-3 sm:px-6 py-2 sm:py-3 rounded-lg hover:bg-gray-600 transition-colors flex items-center justify-center text-xs sm:text-base font-medium touch-friendly whitespace-nowrap"
                         >
-                        <span class="text-sm text-gray-600">sec</span>
+                            <i data-lucide="settings" class="w-3 sm:w-4 h-3 sm:h-4 mr-1 sm:mr-2"></i>
+                            <span class="hidden sm:inline">Show Test Options</span>
+                            <span class="sm:hidden">Test</span>
+                        </button>
                     </div>
-                    <button 
-                        id="toggleTestBtn" 
-                        class="bg-gray-500 text-white px-6 py-3 rounded-lg hover:bg-gray-600 transition-colors flex items-center justify-center text-base font-medium touch-friendly"
-                    >
-                        <i data-lucide="settings" class="w-4 h-4 mr-2"></i>
-                        Show Test Options
-                    </button>
                 </div>
                 
                 <!-- Recording Status -->
@@ -321,137 +500,213 @@
             <div id="errorMessage" class="hidden mt-4 p-4 bg-red-50 border border-red-200 rounded-lg text-red-800"></div>
         </div>
 
+        <!-- Mindmap Prompt Management Section -->
+        <div id="mindmapPromptSection" class="hidden bg-white rounded-xl shadow-lg border border-gray-200 mb-4 sm:mb-6">
+            <button 
+                id="mindmapPromptToggle" 
+                onclick="toggleMindmapPromptSection()"
+                class="w-full px-4 sm:px-6 py-4 text-left hover:bg-gray-50 transition-colors duration-200"
+            >
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center space-x-3">
+                        <div class="w-8 h-8 bg-purple-100 rounded-lg flex items-center justify-center">
+                            <i data-lucide="file-text" class="w-5 h-5 text-purple-600"></i>
+                        </div>
+                        <div>
+                            <h3 class="text-base sm:text-lg font-semibold text-gray-900">Mindmap Prompt Library</h3>
+                            <p class="text-xs sm:text-sm text-gray-600">Load and manage AI prompts for mindmap generation</p>
+                        </div>
+                    </div>
+                    <svg id="mindmapPromptChevron" class="w-5 h-5 text-gray-400 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                    </svg>
+                </div>
+            </button>
+            
+            <div id="mindmapPromptEditor" class="hidden border-t border-gray-200">
+                <div class="p-4 sm:p-6">
+                    <!-- Prompt Library Section -->
+                    <div class="mb-6">
+                        <div class="flex items-center justify-between mb-4">
+                            <h4 class="text-sm font-semibold text-gray-700">Mindmap Prompt Library</h4>
+                            <div class="flex gap-2">
+                                <button onclick="refreshMindmapPrompts()" class="text-xs text-gray-500 hover:text-gray-700 flex items-center">
+                                    <i data-lucide="refresh-cw" class="w-3 h-3 mr-1"></i>
+                                    Refresh
+                                </button>
+                                <button onclick="openCreateMindmapPromptModal()" class="text-xs bg-blue-600 text-white px-2 py-1 rounded hover:bg-blue-700 flex items-center">
+                                    <i data-lucide="plus" class="w-3 h-3 mr-1"></i>
+                                    New
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <!-- Search and Filter -->
+                        <div class="flex gap-2 mb-3">
+                            <div class="flex-1 relative">
+                                <i data-lucide="search" class="absolute left-3 top-1/2 transform -translate-y-1/2 w-3 h-3 text-gray-400"></i>
+                                <input 
+                                    id="mindmapPromptSearch" 
+                                    type="text" 
+                                    placeholder="Search mindmap prompts..." 
+                                    class="w-full pl-8 pr-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    onkeyup="filterMindmapPrompts()"
+                                >
+                            </div>
+                            <select id="mindmapPromptCategoryFilter" class="px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent" onchange="filterMindmapPrompts()">
+                                <option value="">All Categories</option>
+                            </select>
+                        </div>
+                        
+                        <!-- Prompt Cards Grid -->
+                        <div id="mindmapPromptLibraryGrid" class="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-64 overflow-y-auto">
+                            <div class="flex items-center justify-center py-8 text-gray-500 text-sm col-span-full">
+                                <i data-lucide="loader" class="w-4 h-4 mr-2 animate-spin"></i>
+                                Loading mindmap prompts...
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- Main Mindmap Interface -->
         <div id="mindmapInterface" class="hidden">
-            <div class="flex gap-6">
+            <div class="flex flex-col lg:flex-row gap-4 lg:gap-6">
                 <!-- Mindmap Visualization -->
                 <div class="flex-1 bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
-                    <div class="p-4 border-b border-gray-100 bg-gradient-to-r from-blue-50 to-purple-50">
-                        <div class="flex items-center justify-between">
-                            <div>
-                                <h3 class="text-lg font-bold text-gray-900 flex items-center">
-                                    <i data-lucide="network" class="w-5 h-5 mr-2 text-blue-600"></i>
-                                    Interactive Mindmap
+                    <div class="p-3 sm:p-4 border-b border-gray-100 bg-gradient-to-r from-blue-50 to-purple-50">
+                        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                            <div class="min-w-0">
+                                <h3 class="text-base sm:text-lg font-bold text-gray-900 flex items-center">
+                                    <i data-lucide="network" class="w-4 sm:w-5 h-4 sm:h-5 mr-2 text-blue-600 flex-shrink-0"></i>
+                                    <span class="truncate">Interactive Mindmap</span>
                                 </h3>
-                                <p class="text-sm text-gray-600 mt-1">Zoom with mouse wheel, drag to pan, hover for details</p>
+                                <p class="text-xs sm:text-sm text-gray-600 mt-1">Zoom, pan, drag nodes, click text for details</p>
                             </div>
-                            <div class="flex items-center space-x-2">
+                            <div class="flex flex-wrap items-center gap-2">
                                 <button 
                                     id="recenterBtn"
-                                    class="bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 transition-colors flex items-center text-sm font-medium"
+                                    class="bg-gray-600 text-white px-3 py-2 rounded-lg hover:bg-gray-700 transition-colors flex items-center text-xs sm:text-sm font-medium"
                                 >
-                                    <i data-lucide="focus" class="w-4 h-4 mr-2"></i>
-                                    Recenter
+                                    <i data-lucide="focus" class="w-3 sm:w-4 h-3 sm:h-4 mr-1 sm:mr-2"></i>
+                                    <span class="hidden sm:inline">Recenter</span>
+                                    <span class="sm:hidden">Center</span>
                                 </button>
                                 
                                 <!-- Help tooltip for text expansion -->
                                 <div class="relative group">
-                                    <button class="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors duration-200 flex items-center text-sm">
-                                        <i data-lucide="help-circle" class="w-4 h-4 mr-2"></i>
-                                        Help
+                                    <button class="px-3 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors duration-200 flex items-center text-xs sm:text-sm">
+                                        <i data-lucide="help-circle" class="w-3 sm:w-4 h-3 sm:h-4 mr-1 sm:mr-2"></i>
+                                        <span class="hidden sm:inline">Help</span>
+                                        <span class="sm:hidden">?</span>
                                     </button>
-                                    <div class="absolute bottom-full left-0 mb-2 w-64 bg-black text-white text-xs rounded-lg py-2 px-3 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-10">
-                                        <strong>💡 Tip:</strong> Click on any text in the mindmap to see the full content if it's truncated. Hover over text to see it's clickable!
+                                    <div class="absolute bottom-full left-0 mb-2 w-48 sm:w-64 bg-black text-white text-xs rounded-lg py-2 px-3 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-10">
+                                        <strong>💡 Tip:</strong> Click text to expand, drag nodes to rearrange!
                                         <div class="absolute top-full left-4 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-black"></div>
                                     </div>
                                 </div>
                                 <button 
                                     id="toggleChatBtn"
-                                    class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center text-sm font-medium"
+                                    class="bg-blue-600 text-white px-3 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center text-xs sm:text-sm font-medium"
                                 >
-                                    <i data-lucide="message-circle" class="w-4 h-4 mr-2"></i>
-                                    Show AI Chat
+                                    <i data-lucide="message-circle" class="w-3 sm:w-4 h-3 sm:h-4 mr-1 sm:mr-2"></i>
+                                    <span class="hidden sm:inline">Show AI Chat</span>
+                                    <span class="sm:hidden">Chat</span>
                                 </button>
                                 <button 
                                     id="continueRecordingBtn"
-                                    class="hidden bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition-colors flex items-center text-sm font-medium"
+                                    class="hidden bg-red-600 text-white px-3 py-2 rounded-lg hover:bg-red-700 transition-colors flex items-center text-xs sm:text-sm font-medium"
                                 >
-                                    <i data-lucide="square" class="w-4 h-4 mr-2"></i>
-                                    Stop Recording
+                                    <i data-lucide="square" class="w-3 sm:w-4 h-3 sm:h-4 mr-1 sm:mr-2"></i>
+                                    <span class="hidden sm:inline">Stop Recording</span>
+                                    <span class="sm:hidden">Stop</span>
                                 </button>
                                 <button 
                                     id="resetSessionBtn"
-                                    class="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition-colors flex items-center text-sm font-medium"
+                                    class="bg-red-600 text-white px-3 py-2 rounded-lg hover:bg-red-700 transition-colors flex items-center text-xs sm:text-sm font-medium"
                                 >
-                                    <i data-lucide="rotate-ccw" class="w-4 h-4 mr-2"></i>
-                                    Reset
+                                    <i data-lucide="rotate-ccw" class="w-3 sm:w-4 h-3 sm:h-4 mr-1 sm:mr-2"></i>
+                                    <span class="hidden sm:inline">Reset</span>
+                                    <span class="sm:hidden">↻</span>
                                 </button>
                             </div>
                         </div>
                     </div>
-                    <div class="mindmap-container" style="height: 600px;" id="mindmapContainer">
+                    <div class="mindmap-container" style="height: 400px; min-height: 400px;" id="mindmapContainer">
                         <div class="flex items-center justify-center h-full text-gray-500">
-                            <div class="text-center">
-                                <i data-lucide="brain-circuit" class="w-16 h-16 mx-auto mb-4 opacity-50"></i>
-                                <p class="text-lg font-medium">Your mindmap will appear here</p>
-                                <p class="text-sm opacity-75">Enter a topic and start speaking to generate your mindmap</p>
+                            <div class="text-center p-4">
+                                <i data-lucide="brain-circuit" class="w-12 sm:w-16 h-12 sm:h-16 mx-auto mb-4 opacity-50"></i>
+                                <p class="text-sm sm:text-lg font-medium">Your mindmap will appear here</p>
+                                <p class="text-xs sm:text-sm opacity-75 mt-1">Enter a topic and start speaking</p>
                             </div>
                         </div>
                     </div>
                     
                     <!-- Session Info Bar -->
-                    <div id="sessionInfoBar" class="hidden p-3 border-t border-gray-100 bg-gray-50 text-sm text-gray-600">
-                        <div class="flex items-center justify-between">
-                            <div class="flex items-center space-x-4">
-                                <span><strong>Topic:</strong> <span id="currentTopic">-</span></span>
+                    <div id="sessionInfoBar" class="hidden p-2 sm:p-3 border-t border-gray-100 bg-gray-50 text-xs sm:text-sm text-gray-600">
+                        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                            <div class="flex flex-wrap items-center gap-2 sm:gap-4 text-xs">
+                                <span><strong>Topic:</strong> <span id="currentTopic" class="break-words">-</span></span>
                                 <span><strong>Started:</strong> <span id="sessionStartTime">-</span></span>
                                 <span><strong>Duration:</strong> <span id="sessionDuration">0:00</span></span>
                             </div>
                             <button 
                                 id="saveSessionBtn"
-                                class="bg-blue-600 text-white px-3 py-1 rounded text-sm hover:bg-blue-700 transition-colors flex items-center"
+                                class="bg-blue-600 text-white px-3 py-1 rounded text-xs sm:text-sm hover:bg-blue-700 transition-colors flex items-center self-start sm:self-auto"
                             >
-                                <i data-lucide="download" class="w-4 h-4 mr-1"></i>
-                                Download JSON
+                                <i data-lucide="download" class="w-3 sm:w-4 h-3 sm:h-4 mr-1"></i>
+                                <span class="hidden sm:inline">Download JSON</span>
+                                <span class="sm:hidden">Save</span>
                             </button>
                         </div>
                     </div>
                 </div>
 
-                <!-- Chat Panel (Hidden by default, slides in from right) -->
-                <div id="chatPanel" class="hidden w-96 bg-white rounded-xl shadow-lg border border-gray-200 flex flex-col" style="height: 680px;">
-                    <div class="p-4 border-b border-gray-100 bg-gradient-to-r from-green-50 to-blue-50">
+                <!-- Chat Panel (Responsive: slides in from bottom on mobile, from right on desktop) -->
+                <div id="chatPanel" class="hidden w-full lg:w-96 bg-white rounded-xl shadow-lg border border-gray-200 flex flex-col" style="height: 400px; min-height: 400px;">
+                    <div class="p-3 sm:p-4 border-b border-gray-100 bg-gradient-to-r from-green-50 to-blue-50 flex-shrink-0">
                         <div class="flex items-center justify-between">
-                            <div>
-                                <h3 class="text-lg font-bold text-gray-900 flex items-center">
-                                    <i data-lucide="message-circle" class="w-5 h-5 mr-2 text-green-600"></i>
-                                    💬 AI Processing Log
+                            <div class="min-w-0">
+                                <h3 class="text-sm sm:text-lg font-bold text-gray-900 flex items-center">
+                                    <i data-lucide="message-circle" class="w-4 sm:w-5 h-4 sm:h-5 mr-2 text-green-600 flex-shrink-0"></i>
+                                    <span class="truncate">💬 AI Processing Log</span>
                                 </h3>
-                                <p class="text-sm text-gray-600 mt-1">See how AI processes your speech</p>
+                                <p class="text-xs sm:text-sm text-gray-600 mt-1">AI analysis updates automatically</p>
                             </div>
                             <button 
                                 id="hideChatBtn"
-                                class="bg-gray-500 text-white px-3 py-1 rounded text-sm hover:bg-gray-600 transition-colors"
+                                class="bg-gray-500 text-white px-2 sm:px-3 py-1 rounded text-xs sm:text-sm hover:bg-gray-600 transition-colors flex-shrink-0"
                             >
-                                <i data-lucide="x" class="w-4 h-4"></i>
+                                <i data-lucide="x" class="w-3 sm:w-4 h-3 sm:h-4"></i>
                             </button>
                         </div>
                     </div>
                     
-                    <div id="chatMessages" class="flex-1 p-4 overflow-y-auto custom-scroll space-y-3">
-                        <div class="text-center text-gray-500 py-8">
-                            <i data-lucide="message-square-plus" class="w-8 h-8 mx-auto mb-2 opacity-50"></i>
-                            <p class="text-sm">AI processing logs will appear here when you speak!</p>
+                    <div id="chatMessages" class="flex-1 p-3 sm:p-4 overflow-y-auto custom-scroll space-y-3 min-h-0">
+                        <div class="text-center text-gray-500 py-4 sm:py-8">
+                            <i data-lucide="message-square-plus" class="w-6 sm:w-8 h-6 sm:h-8 mx-auto mb-2 opacity-50"></i>
+                            <p class="text-xs sm:text-sm">AI processing logs appear here automatically!</p>
                         </div>
                     </div>
 
-                    <div class="p-4 border-t border-gray-100 bg-gray-50">
+                    <div class="p-3 sm:p-4 border-t border-gray-100 bg-gray-50 flex-shrink-0">
                         <div class="flex gap-2">
                             <textarea 
                                 id="chatInput" 
                                 rows="2" 
                                 disabled
-                                class="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm resize-none disabled:bg-gray-100 disabled:cursor-not-allowed"
-                                placeholder="Type additional information to add to your mindmap..."
+                                class="flex-1 px-2 sm:px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-xs sm:text-sm resize-none disabled:bg-gray-100 disabled:cursor-not-allowed min-w-0"
+                                placeholder="Type additional information..."
                                 onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();addToMindmap();}"
                             ></textarea>
                             <button 
                                 id="sendBtn" 
                                 disabled
-                                class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center touch-friendly"
+                                class="bg-blue-600 text-white px-3 sm:px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center touch-friendly flex-shrink-0"
                                 onclick="addToMindmap()"
                             >
-                                <i data-lucide="send" class="w-4 h-4"></i>
+                                <i data-lucide="send" class="w-3 sm:w-4 h-3 sm:h-4"></i>
                             </button>
                         </div>
                     </div>
@@ -682,9 +937,8 @@
                         currentMindmapData = result.mindmapData;
                         renderMindmap(result.mindmapData);
                         
-                        // Add to chat if visible
-                        const chatPanel = document.getElementById('chatPanel');
-                        if (!chatPanel.classList.contains('hidden') && result.transcript) {
+                        // Always add to chat (even if hidden) - users can see it when they expand
+                        if (result.transcript) {
                             addChatMessage('user', result.transcript);
                             if (result.message) {
                                 addChatMessage('ai', result.message, result.rawAiResponse);
@@ -696,9 +950,8 @@
                         // Content was filtered out as non-academic
                         updateStatus("Content filtered (non-academic)", "info");
                         
-                        // Add to chat if visible to show what was filtered
-                        const chatPanel = document.getElementById('chatPanel');
-                        if (!chatPanel.classList.contains('hidden') && result.transcript) {
+                        // Always add to chat to show what was filtered (even when hidden)
+                        if (result.transcript) {
                             addChatMessage('user', result.transcript);
                             addChatMessage('ai', '🔍 ' + (result.message || 'Content filtered: no academic value detected'), result.rawAiResponse);
                         }
@@ -1010,12 +1263,9 @@
                 // Increment speech count
                 currentSession.speechCount = (currentSession.speechCount || 0) + 1;
                 
-                // Show processing in chat if visible
-                const chatPanel = document.getElementById('chatPanel');
-                if (!chatPanel.classList.contains('hidden')) {
-                    addChatMessage('user', text);
-                    var thinkingId = addChatMessage('ai', 'Processing speech and updating mindmap...', null, true);
-                }
+                // Show processing in chat (always, even if hidden)
+                addChatMessage('user', text);
+                var thinkingId = addChatMessage('ai', 'Processing speech and updating mindmap...', null, true);
 
                 let response, result;
 
@@ -1043,11 +1293,9 @@
 
                 result = await response.json();
                 
-                // Remove thinking indicator if chat is visible
-                if (!chatPanel.classList.contains('hidden')) {
-                    const thinkingEl = document.getElementById(thinkingId);
-                    if (thinkingEl) thinkingEl.remove();
-                }
+                // Remove thinking indicator (always)
+                const thinkingEl = document.getElementById(thinkingId);
+                if (thinkingEl) thinkingEl.remove();
 
                 if (!response.ok) {
                     throw new Error(result.error || 'Failed to process speech');
@@ -1059,18 +1307,15 @@
                 // Re-render mindmap
                 renderMindmap(result.data);
 
-                // Add AI response to chat if visible
-                if (!chatPanel.classList.contains('hidden')) {
-                    addChatMessage('ai', result.message || 'Mindmap updated successfully!', result.rawAiResponse);
-                }
+                // Always add AI response to chat (even if hidden)
+                addChatMessage('ai', result.message || 'Mindmap updated successfully!', result.rawAiResponse);
 
                 console.log('✅ Successfully processed speech and updated mindmap');
 
             } catch (error) {
                 console.error('❌ Error processing speech:', error);
-                if (!document.getElementById('chatPanel').classList.contains('hidden')) {
-                    addChatMessage('ai', 'Sorry, I encountered an error while processing your speech: ' + error.message, null);
-                }
+                // Always add error message to chat
+                addChatMessage('ai', 'Sorry, I encountered an error while processing your speech: ' + error.message, null);
             }
         }
 
@@ -1455,8 +1700,14 @@ The behavioral patterns of cats are equally impressive. They spend approximately
             // Create main group
             const g = svg.append('g');
 
-            // Create hierarchical layout
-            const tree = d3.tree().size([height - 100, width - 200]);
+            // Create hierarchical layout with better spacing
+            const tree = d3.tree()
+                .size([height - 100, width - 300]) // More horizontal space
+                .separation((a, b) => {
+                    // Increase separation between nodes
+                    return (a.parent === b.parent ? 2 : 3) * (a.depth === 0 ? 3 : 1);
+                });
+            
             const root = d3.hierarchy(data);
             
             // Assign positions
@@ -1468,15 +1719,43 @@ The behavioral patterns of cats are equally impressive. They spend approximately
                 .enter().append('path')
                 .attr('class', 'link')
                 .attr('d', d3.linkHorizontal()
-                    .x(d => d.y + 100)
+                    .x(d => d.y + 150) // More left margin
                     .y(d => d.x));
+
+            // Create drag behavior
+            const drag = d3.drag()
+                .on('start', function(event, d) {
+                    d3.select(this)
+                        .raise()
+                        .classed('dragging', true);
+                })
+                .on('drag', function(event, d) {
+                    // Update node position
+                    d.x = event.y;
+                    d.y = event.x - 150; // Adjust for margin
+                    
+                    // Update this node's position
+                    d3.select(this).attr('transform', `translate(${d.y + 150},${d.x})`);
+                    
+                    // Update links connected to this node
+                    g.selectAll('.link')
+                        .filter(l => l.source === d || l.target === d)
+                        .attr('d', d3.linkHorizontal()
+                            .x(d => d.y + 150)
+                            .y(d => d.x));
+                })
+                .on('end', function(event, d) {
+                    d3.select(this).classed('dragging', false);
+                });
 
             // Create nodes (without animation first)
             const node = g.selectAll('.node')
                 .data(root.descendants())
                 .enter().append('g')
                 .attr('class', 'node')
-                .attr('transform', d => `translate(${d.y + 100},${d.x})`);
+                .attr('transform', d => `translate(${d.y + 150},${d.x})`) // More left margin
+                .style('cursor', 'grab')
+                .call(drag); // Add drag behavior
 
             // Add circles to nodes
             node.append('circle')
@@ -1490,12 +1769,12 @@ The behavioral patterns of cats are equally impressive. They spend approximately
                 .style('stroke', '#fff')
                 .style('stroke-width', 2);
 
-            // Add text labels with better wrapping
+            // Add text labels with better wrapping and spacing
             node.each(function(d) {
                 const nodeGroup = d3.select(this);
                 const text = d.data.name;
                 const words = text.split(' ');
-                const maxCharsPerLine = d.children ? 25 : 30; // Increased character limits
+                const maxCharsPerLine = d.children ? 20 : 25; // Slightly reduced for better fit
                 const maxLines = d.children ? 3 : 4; // Allow more lines
                 const lines = [];
                 let currentLine = '';
@@ -1515,23 +1794,31 @@ The behavioral patterns of cats are equally impressive. They spend approximately
                 if (lines.length > maxLines) {
                     // Only add ellipsis if we're actually cutting off content
                     const lastLine = displayLines[maxLines - 1];
-                    displayLines[maxLines - 1] = lastLine.length > 20 ? 
+                    displayLines[maxLines - 1] = lastLine.length > 15 ? 
                         lastLine.slice(0, -3) + '...' : lastLine + '...';
                 }
 
+                // Calculate text block height for better positioning
+                const lineHeight = 16;
+                const textBlockHeight = displayLines.length * lineHeight;
+                const startY = d.children ? -textBlockHeight/2 - 15 : 8;
+
                 displayLines.forEach((line, i) => {
                     const textElement = nodeGroup.append('text')
-                        .attr('dy', d.children ? -25 + (i * 14) : 5 + (i * 14)) // More spacing between lines
-                        .attr('x', d.children ? 0 : 15)
+                        .attr('dy', startY + (i * lineHeight))
+                        .attr('x', d.children ? 0 : 20) // More space from node
                         .attr('text-anchor', d.children ? 'middle' : 'start')
-                        .style('font-size', d.children ? '13px' : '12px') // Slightly larger font
+                        .style('font-size', d.children ? '14px' : '12px') // Slightly larger
                         .style('font-weight', d.children ? 'bold' : 'normal')
                         .style('fill', '#1e293b')
                         .style('cursor', 'pointer')
+                        .style('text-shadow', '0 1px 2px rgba(255,255,255,0.8)') // Better readability
+                        .style('pointer-events', 'none') // Don't interfere with drag
                         .text(line);
                     
                     // Add hover effects and click handler
                     textElement
+                        .style('pointer-events', 'all') // Re-enable for interactions
                         .on('mouseover', function() {
                             d3.select(this)
                                 .style('fill', '#3b82f6')
@@ -1550,12 +1837,13 @@ The behavioral patterns of cats are equally impressive. They spend approximately
                     // Add a small icon indicator if text is truncated
                     if (lines.length > maxLines && i === displayLines.length - 1) {
                         nodeGroup.append('text')
-                            .attr('dy', d.children ? -25 + ((i + 1) * 14) : 5 + ((i + 1) * 14))
-                            .attr('x', d.children ? 0 : 15)
+                            .attr('dy', startY + ((i + 1) * lineHeight))
+                            .attr('x', d.children ? 0 : 20)
                             .attr('text-anchor', d.children ? 'middle' : 'start')
                             .style('font-size', '10px')
                             .style('fill', '#6b7280')
                             .style('cursor', 'pointer')
+                            .style('pointer-events', 'all')
                             .text('(click to expand)')
                             .on('click', function(event) {
                                 event.stopPropagation();
@@ -1563,6 +1851,21 @@ The behavioral patterns of cats are equally impressive. They spend approximately
                             });
                     }
                 });
+
+                // Add background rectangle for better text readability (optional)
+                if (d.children) {
+                    const bbox = nodeGroup.node().getBBox();
+                    nodeGroup.insert('rect', 'text')
+                        .attr('x', bbox.x - 4)
+                        .attr('y', bbox.y - 2)
+                        .attr('width', bbox.width + 8)
+                        .attr('height', bbox.height + 4)
+                        .attr('rx', 4)
+                        .style('fill', 'rgba(255, 255, 255, 0.9)')
+                        .style('stroke', 'rgba(0, 0, 0, 0.1)')
+                        .style('stroke-width', 1)
+                        .style('pointer-events', 'none');
+                }
             });
 
             // Now apply entrance animations
@@ -1586,9 +1889,9 @@ The behavioral patterns of cats are equally impressive. They spend approximately
                 const fullWidth = container.clientWidth;
                 const fullHeight = container.clientHeight;
                 
-                const widthScale = (fullWidth * 0.9) / bounds.width;
-                const heightScale = (fullHeight * 0.9) / bounds.height;
-                const scale = Math.min(widthScale, heightScale, 1);
+                const widthScale = (fullWidth * 0.85) / bounds.width; // Slightly less aggressive scaling
+                const heightScale = (fullHeight * 0.85) / bounds.height;
+                const scale = Math.min(widthScale, heightScale, 1.2); // Allow slight zoom in
                 
                 const transform = d3.zoomIdentity
                     .translate(
@@ -1601,10 +1904,10 @@ The behavioral patterns of cats are equally impressive. They spend approximately
                 
             } catch (error) {
                 console.error('Error centering mindmap:', error);
-                // Fallback centering
+                // Fallback centering with new margins
                 const transform = d3.zoomIdentity
-                    .translate(width / 2, height / 2)
-                    .scale(0.8);
+                    .translate(width / 4, height / 2) // Account for left margin
+                    .scale(0.9);
                 svg.call(zoom.transform, transform);
             }
         }
@@ -1665,6 +1968,222 @@ The behavioral patterns of cats are equally impressive. They spend approximately
                     renderMindmap(currentMindmapData);
                 }, 250);
             }
+        });
+        
+        // ===================
+        // MINDMAP PROMPT MANAGEMENT
+        // ===================
+        
+        let currentMindmapPrompts = [];
+        let availableMindmapCategories = [];
+        let mindmapPromptSectionOpen = false;
+        
+        // Toggle mindmap prompt section
+        function toggleMindmapPromptSection() {
+            const editor = document.getElementById('mindmapPromptEditor');
+            const chevron = document.getElementById('mindmapPromptChevron');
+            
+            mindmapPromptSectionOpen = !mindmapPromptSectionOpen;
+            
+            if (mindmapPromptSectionOpen) {
+                editor.classList.remove('hidden');
+                chevron.style.transform = 'rotate(180deg)';
+            } else {
+                editor.classList.add('hidden');
+                chevron.style.transform = 'rotate(0deg)';
+            }
+        }
+        
+        // Load mindmap prompt library from API
+        async function loadMindmapPromptLibrary() {
+            try {
+                const response = await fetch('/api/prompts?mode=mindmap&limit=50');
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                
+                const data = await response.json();
+                currentMindmapPrompts = data.prompts;
+                availableMindmapCategories = data.filters.categories;
+                
+                updateMindmapCategoryFilter();
+                displayMindmapPromptLibrary(data.prompts);
+                
+            } catch (err) {
+                console.error('❌ Failed to load mindmap prompt library:', err);
+                document.getElementById('mindmapPromptLibraryGrid').innerHTML = `
+                    <div class="flex items-center justify-center py-8 text-red-500 text-sm col-span-full">
+                        <i data-lucide="alert-circle" class="w-4 h-4 mr-2"></i>
+                        Failed to load prompts: ${err.message}
+                    </div>
+                `;
+                lucide.createIcons();
+            }
+        }
+        
+        // Refresh mindmap prompt library
+        function refreshMindmapPrompts() {
+            document.getElementById('mindmapPromptLibraryGrid').innerHTML = `
+                <div class="flex items-center justify-center py-8 text-gray-500 text-sm col-span-full">
+                    <i data-lucide="loader" class="w-4 h-4 mr-2 animate-spin"></i>
+                    Refreshing prompts...
+                </div>
+            `;
+            lucide.createIcons();
+            loadMindmapPromptLibrary();
+        }
+        
+        // Update mindmap category filter options
+        function updateMindmapCategoryFilter() {
+            const categoryFilter = document.getElementById('mindmapPromptCategoryFilter');
+            const currentValue = categoryFilter.value;
+            
+            // Clear existing options (except "All Categories")
+            while (categoryFilter.children.length > 1) {
+                categoryFilter.removeChild(categoryFilter.lastChild);
+            }
+            
+            // Add category options
+            availableMindmapCategories.forEach(category => {
+                const option = document.createElement('option');
+                option.value = category;
+                option.textContent = category;
+                categoryFilter.appendChild(option);
+            });
+            
+            // Restore selection
+            categoryFilter.value = currentValue;
+        }
+        
+        // Display mindmap prompt library
+        function displayMindmapPromptLibrary(prompts) {
+            const grid = document.getElementById('mindmapPromptLibraryGrid');
+            
+            if (prompts.length === 0) {
+                grid.innerHTML = `
+                    <div class="flex items-center justify-center py-8 text-gray-500 text-sm col-span-full">
+                        <i data-lucide="file-text" class="w-4 h-4 mr-2"></i>
+                        No mindmap prompts found
+                    </div>
+                `;
+                lucide.createIcons();
+                return;
+            }
+            
+            const promptsHtml = prompts.map(prompt => `
+                <div class="bg-gray-50 rounded-lg p-3 hover:bg-gray-100 transition-colors cursor-pointer border border-gray-200" onclick="loadMindmapPrompt('${prompt._id}')">
+                    <div class="flex items-start justify-between mb-2">
+                        <h5 class="text-sm font-medium text-gray-900 truncate flex-1 mr-2">${prompt.title}</h5>
+                        <div class="flex items-center space-x-1 flex-shrink-0">
+                            ${prompt.isPublic ? '<i data-lucide="globe" class="w-3 h-3 text-green-500" title="Public"></i>' : '<i data-lucide="lock" class="w-3 h-3 text-gray-400" title="Private"></i>'}
+                            <button onclick="event.stopPropagation(); editMindmapPrompt('${prompt._id}')" class="text-blue-500 hover:text-blue-700" title="Edit">
+                                <i data-lucide="edit" class="w-3 h-3"></i>
+                            </button>
+                            <button onclick="event.stopPropagation(); deleteMindmapPrompt('${prompt._id}')" class="text-red-500 hover:text-red-700" title="Delete">
+                                <i data-lucide="trash-2" class="w-3 h-3"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <p class="text-xs text-gray-600 mb-2 line-clamp-2">${prompt.description || 'No description'}</p>
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center space-x-2">
+                            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-200 text-gray-800">
+                                ${prompt.category}
+                            </span>
+                            ${prompt.tags && prompt.tags.length > 0 ? `<span class="text-xs text-gray-500">+${prompt.tags.length} tags</span>` : ''}
+                        </div>
+                        <div class="text-xs text-gray-500">
+                            ${prompt.usage_count || 0} uses
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+            
+            grid.innerHTML = promptsHtml;
+            lucide.createIcons();
+        }
+        
+        // Filter mindmap prompts
+        function filterMindmapPrompts() {
+            const search = document.getElementById('mindmapPromptSearch').value.toLowerCase();
+            const category = document.getElementById('mindmapPromptCategoryFilter').value;
+            
+            let filteredPrompts = currentMindmapPrompts.filter(prompt => {
+                const matchesSearch = !search || 
+                    prompt.title.toLowerCase().includes(search) ||
+                    (prompt.description && prompt.description.toLowerCase().includes(search)) ||
+                    prompt.content.toLowerCase().includes(search) ||
+                    (prompt.tags && prompt.tags.some(tag => tag.toLowerCase().includes(search)));
+                
+                const matchesCategory = !category || prompt.category === category;
+                
+                return matchesSearch && matchesCategory;
+            });
+            
+            displayMindmapPromptLibrary(filteredPrompts);
+        }
+        
+        // Load a mindmap prompt (for future use when mindmap prompts are implemented)
+        async function loadMindmapPrompt(promptId) {
+            try {
+                const response = await fetch(`/api/prompts/${promptId}/use`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ sessionCode: 'mindmap-interface' })
+                });
+                
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                
+                const data = await response.json();
+                const prompt = data.prompt;
+                
+                // For now, just show a message - in future this could set mindmap generation prompts
+                showMessage(`✅ Loaded mindmap prompt: "${prompt.title}"`, 'success');
+                console.log('Mindmap prompt loaded:', prompt);
+                
+            } catch (err) {
+                console.error('❌ Failed to load mindmap prompt:', err);
+                showMessage(`❌ Failed to load prompt: ${err.message}`, 'error');
+            }
+        }
+        
+        // Placeholder functions for mindmap prompt management
+        function openCreateMindmapPromptModal() {
+            alert('Mindmap prompt creation will be available in a future update!');
+        }
+        
+        function editMindmapPrompt(promptId) {
+            alert('Mindmap prompt editing will be available in a future update!');
+        }
+        
+        function deleteMindmapPrompt(promptId) {
+            alert('Mindmap prompt deletion will be available in a future update!');
+        }
+        
+        // Show the mindmap prompt section when mindmap interface is loaded
+        function showMindmapPromptSection() {
+            document.getElementById('mindmapPromptSection').classList.remove('hidden');
+        }
+        
+        // Initialize mindmap prompt library when needed
+        function initializeMindmapPrompts() {
+            if (currentMindmapPrompts.length === 0) {
+                loadMindmapPromptLibrary();
+            }
+            showMindmapPromptSection();
+        }
+        
+        // Integrate with existing mindmap initialization
+        const originalShowMindmapInterface = window.showMindmapInterface || function() {};
+        window.showMindmapInterface = function() {
+            originalShowMindmapInterface();
+            setTimeout(() => {
+                initializeMindmapPrompts();
+            }, 500);
+        };
+        
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            // Load mindmap prompts in the background
+            setTimeout(loadMindmapPromptLibrary, 1000);
         });
     </script>
 </body>

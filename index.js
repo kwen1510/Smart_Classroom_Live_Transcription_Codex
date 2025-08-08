@@ -27,6 +27,10 @@ const sessionTimers = new Map();  // sessionCode -> timer
 // Global storage for session transcript history
 const sessionTranscriptHistory = new Map();
 
+// Utility helpers and globals
+// Cache the latest emitted checklist state per session+group so we can reuse it on release
+const latestChecklistState = new Map();
+
 // Helper function to manage transcript history
 function addToTranscriptHistory(sessionCode, transcript) {
   if (!sessionTranscriptHistory.has(sessionCode)) {
@@ -109,7 +113,7 @@ async function connectToDatabase() {
     client = new MongoClient(uri, {
       serverApi: {
         version: ServerApiVersion.v1,
-        strict: true,
+        strict: false,
         deprecationErrors: true,
       }
     });
@@ -130,8 +134,17 @@ async function connectToDatabase() {
     await db.collection("checkbox_results").createIndex({ "session_id": 1, "timestamp": 1 });
     await db.collection("mindmap_archives").createIndex({ "session_id": 1, "saved_at": 1 });
     await db.collection("mindmap_archives").createIndex({ "session_code": 1 });
+    await db.collection("teacher_prompts").createIndex({ "title": "text", "description": "text", "content": "text", "tags": "text" });
+    await db.collection("teacher_prompts").createIndex({ "category": 1 });
+    await db.collection("teacher_prompts").createIndex({ "mode": 1 });
+    await db.collection("teacher_prompts").createIndex({ "isPublic": 1 });
+    await db.collection("teacher_prompts").createIndex({ "created_at": -1 });
+    await db.collection("teacher_prompts").createIndex({ "usage_count": -1 });
     
     console.log('📊 Database indexes ready');
+    
+    // Seed default prompts for teachers
+    await seedDefaultPrompts();
     
     // Start server after database connection
     const port = process.env.PORT || 10000;
@@ -318,6 +331,11 @@ app.post("/api/session/:code/prompt", express.json(), async (req, res) => {
         total_duration_seconds: null
       });
       session = { _id: newId };
+    }
+    
+    // Clean up any old data for this session to ensure fresh start
+    if (session) {
+      await cleanupOldSessionData(sessionCode);
     }
     
     // Save prompt for this session
@@ -1373,9 +1391,9 @@ Otherwise, create a structured mindmap:
 Generate proper UUIDs for each node. Return ONLY the JSON object.`;
 
     const body = {
-      model: "claude-3-5-sonnet-20241022",
-      max_tokens: 2048,
-      temperature: 0.1, // Very low for consistent structure
+      model: "claude-sonnet-4-20250514", // Using Claude Sonnet 4 as requested
+      max_tokens: 2000, // Increased for comprehensive prompt and detailed analysis
+      temperature: 0, // Set to 0 for maximum consistency
       messages: [{
         role: "user",
         content: prompt
@@ -1528,9 +1546,9 @@ Return format:
 Generate proper UUIDs for any new nodes. Return ONLY the JSON object.`;
 
     const body = {
-      model: "claude-3-5-sonnet-20241022",
-      max_tokens: 2048,
-      temperature: 0.1, // Very low for consistent structure
+      model: "claude-sonnet-4-20250514", // Using Claude Sonnet 4 as requested
+      max_tokens: 2000, // Increased for comprehensive prompt and detailed analysis
+      temperature: 0, // Set to 0 for maximum consistency
       messages: [{
         role: "user",
         content: prompt
@@ -1640,50 +1658,64 @@ function convertLegacyToMaestro(legacyData, mainTopic) {
 
 /* ---------- Checkbox Mode API Endpoints ---------- */
 
+/* Cleanup session data */
+app.post("/api/cleanup/:sessionCode", async (req, res) => {
+  try {
+    const { sessionCode } = req.params;
+    await cleanupOldSessionData(sessionCode);
+    res.json({ success: true, message: `Session ${sessionCode} cleaned up` });
+  } catch (err) {
+    console.error(`❌ Cleanup API error:`, err);
+    res.status(500).json({ error: "Cleanup failed" });
+  }
+});
+
 /* Create checkbox session */
 app.post("/api/checkbox/session", express.json(), async (req, res) => {
   try {
-    const { sessionCode, criteria, interval = 30000, scenario = "" } = req.body;
+    const { sessionCode, criteria, scenario, interval, strictness = 2 } = req.body; // Default strictness to 2 (moderate)
     
-    if (!sessionCode || !criteria || !Array.isArray(criteria)) {
-      return res.status(400).json({ error: "Session code and criteria array required" });
+    if (!sessionCode || !criteria || criteria.length === 0) {
+      return res.status(400).json({ error: "Session code and criteria required" });
     }
     
     console.log(`☑️ Creating checkbox session: ${sessionCode} with ${criteria.length} criteria`);
-    if (scenario) {
-      console.log(`📝 Scenario: ${scenario.substring(0, 100)}${scenario.length > 100 ? '...' : ''}`);
-    }
+    console.log(`📝 Scenario: ${scenario ? scenario.substring(0, 100) + '...' : 'None provided'}`);
+    console.log(`⚖️ Strictness level: ${strictness} (1=Lenient, 2=Moderate, 3=Strict)`);
     
     // Check if session already exists
     let session = await db.collection("sessions").findOne({ code: sessionCode });
     
-    const now = Date.now();
+    // Clean up any old data for this session to ensure fresh start
+    if (session) {
+      await cleanupOldSessionData(sessionCode);
+    }
     
+    // Create or update session
     if (!session) {
       // Create new session
-      const sessionId = uuid();
       session = {
-        _id: sessionId,
+        _id: uuid(),
         code: sessionCode,
         mode: "checkbox",
-        interval_ms: interval,
-        created_at: now,
-        active: true,
-        start_time: now,
-        end_time: null
+        active: false, // Stay inactive until /api/session/:code/start is called
+        interval_ms: interval || 30000,
+        strictness: strictness, // Store strictness level
+        created_at: Date.now()
       };
+      
       await db.collection("sessions").insertOne(session);
     } else {
       // Update existing session
       await db.collection("sessions").updateOne(
-        { code: sessionCode },
-        {
-          $set: {
-            mode: "checkbox",
-            interval_ms: interval,
-            active: true,
-            start_time: now,
-            end_time: null
+        { _id: session._id },
+        { 
+          $set: { 
+            mode: "checkbox", 
+            active: false, // Stay inactive until /api/session/:code/start is called
+            interval_ms: interval || 30000,
+            strictness: strictness, // Update strictness level
+            updated_at: Date.now() 
           }
         }
       );
@@ -1695,7 +1727,7 @@ app.post("/api/checkbox/session", express.json(), async (req, res) => {
       {
         $set: {
           scenario: scenario,
-          created_at: now
+          created_at: Date.now()
         }
       },
       { upsert: true }
@@ -1706,16 +1738,34 @@ app.post("/api/checkbox/session", express.json(), async (req, res) => {
     await db.collection("checkbox_progress").deleteMany({ session_id: session._id });
     
     const criteriaIds = [];
-    for (const criterion of criteria) {
+    for (let index = 0; index < criteria.length; index++) {
+      const criterion = criteria[index];
       const criterionId = uuid();
       await db.collection("checkbox_criteria").insertOne({
         _id: criterionId,
         session_id: session._id,
         description: criterion.description,
+        rubric: criterion.rubric || '',  // Add rubric field
         weight: criterion.weight || 1,
-        created_at: now
+        order_index: index,
+        created_at: Date.now()
       });
       criteriaIds.push(criterionId);
+      
+      // Initialize progress records for each group (1-10 for now)
+      // This ensures all criteria have a baseline state
+      for (let groupNum = 1; groupNum <= 10; groupNum++) {
+        await db.collection("checkbox_progress").insertOne({
+          _id: uuid(),
+          session_id: session._id,
+          criteria_id: criterionId,
+          group_number: groupNum,
+          status: 'grey',
+          completed: false,
+          quote: null,
+          created_at: Date.now()
+        });
+      }
     }
     
     // Add to active sessions
@@ -1723,10 +1773,10 @@ app.post("/api/checkbox/session", express.json(), async (req, res) => {
       id: session._id,
       code: sessionCode,
       mode: "checkbox",
-      active: true,
+      active: false, // Stay inactive until /api/session/:code/start is called
       interval: interval,
-      startTime: now,
-      created_at: now,
+      startTime: null,
+      created_at: Date.now(),
       persisted: true
     });
     
@@ -1746,13 +1796,13 @@ app.post("/api/checkbox/session", express.json(), async (req, res) => {
 /* Process transcript for checkbox */
 app.post("/api/checkbox/process", express.json(), async (req, res) => {
   try {
-    const { sessionCode, transcript } = req.body;
+    const { sessionCode, transcript, groupNumber = 1 } = req.body; // Add groupNumber with default
     
     if (!sessionCode || !transcript) {
       return res.status(400).json({ error: "Session code and transcript required" });
     }
     
-    console.log(`☑️ Processing transcript for checkbox session: ${sessionCode}`);
+    console.log(`☑️ Processing transcript for checkbox session: ${sessionCode}, group: ${groupNumber}`);
     
     // Get session info
     const session = await db.collection("sessions").findOne({ code: sessionCode, mode: "checkbox" });
@@ -1763,19 +1813,49 @@ app.post("/api/checkbox/process", express.json(), async (req, res) => {
     // Get checkbox session data (includes scenario)
     const checkboxSession = await db.collection("checkbox_sessions").findOne({ session_id: session._id });
     const scenario = checkboxSession?.scenario || "";
+    const strictness = session.strictness || 2; // Get strictness from session
     
     // Get criteria
     const criteria = await db.collection("checkbox_criteria")
       .find({ session_id: session._id })
-      .sort({ created_at: 1 })
+      .sort({ order_index: 1, created_at: 1 })
       .toArray();
     
     if (criteria.length === 0) {
       return res.status(400).json({ error: "No criteria found for session" });
     }
     
-    // Process the transcript with scenario context
-    const result = await processCheckboxTranscript(transcript, criteria, scenario);
+    // Get existing progress for this group to avoid re-evaluating GREEN criteria
+    const existingProgressRecords = await db.collection("checkbox_progress")
+      .find({ 
+        session_id: session._id,
+        group_number: groupNumber 
+      })
+      .toArray();
+    
+    // Build existing progress array indexed by criteria position
+    const existingProgress = [];
+    criteria.forEach((c, idx) => {
+      const progress = existingProgressRecords.find(p => p.criteria_id === c._id);
+      if (progress) {
+        existingProgress[idx] = {
+          status: progress.status,
+          quote: progress.quote,
+          completed: progress.completed
+        };
+      } else {
+        existingProgress[idx] = null;
+      }
+    });
+    
+    console.log(`📋 Found ${existingProgressRecords.length} existing progress records for group ${groupNumber}`);
+    const greenCount = existingProgress.filter(p => p && p.status === 'green').length;
+    if (greenCount > 0) {
+      console.log(`📋 Preserving ${greenCount} GREEN criteria from previous evaluations`);
+    }
+    
+    // Process the transcript with scenario context and strictness
+    const result = await processCheckboxTranscript(transcript, criteria, scenario, strictness, existingProgress);
     
     // Log the processing result
     await db.collection("session_logs").insertOne({
@@ -1794,30 +1874,77 @@ app.post("/api/checkbox/process", express.json(), async (req, res) => {
     for (const match of result.matches) {
       const criterion = criteria[match.criteria_index];
       if (criterion) {
-        await db.collection("checkbox_progress").findOneAndUpdate(
-          { 
-            session_id: session._id,
-            criteria_id: criterion._id
-          },
-          {
-            $set: {
-              completed: true,
-              quote: match.quote,
-              completed_at: now
-            }
-          },
-          { upsert: true }
-        );
-        
-        // Use the criteria_index (0, 1, 2, etc.) instead of MongoDB _id
-        progressUpdates.push({
-          criteriaId: match.criteria_index,  // This matches the frontend's c.id
-          description: criterion.description,
-          completed: true,
-          quote: match.quote
+        // Check existing progress to implement proper locking rules
+        const existingProgress = await db.collection("checkbox_progress").findOne({
+          session_id: session._id,
+          criteria_id: criterion._id
         });
         
-        console.log(`📋 Checkbox update for criteria ${match.criteria_index}: "${match.quote}"`);
+        // Implement locking rules:
+        // 1. GREEN stays GREEN forever (locked)
+        // 2. GREY has no quotes and can become RED or GREEN
+        // 3. RED can become GREEN but not GREY
+        let shouldUpdate = false;
+        let newStatus = match.status;
+        let newQuote = match.status === 'grey' ? null : match.quote; // Grey has no quotes
+        
+        if (!existingProgress) {
+          // No existing progress - always update
+          shouldUpdate = true;
+        } else if (existingProgress.status === 'green') {
+          // GREEN is locked - never update
+          console.log(`📋 Criteria ${match.criteria_index} already GREEN (locked) with quote: "${existingProgress.quote}" - skipping update`);
+          shouldUpdate = false;
+        } else if (existingProgress.status === 'grey') {
+          // GREY can become RED or GREEN
+          if (match.status === 'red' || match.status === 'green') {
+            shouldUpdate = true;
+            console.log(`📋 Criteria ${match.criteria_index} upgrading from GREY to ${match.status.toUpperCase()}`);
+          }
+        } else if (existingProgress.status === 'red') {
+          // RED can only become GREEN
+          if (match.status === 'green') {
+            shouldUpdate = true;
+            console.log(`📋 Criteria ${match.criteria_index} upgrading from RED to GREEN`);
+          } else {
+            console.log(`📋 Criteria ${match.criteria_index} staying RED - cannot downgrade to ${match.status.toUpperCase()}`);
+            shouldUpdate = false;
+          }
+        }
+        
+        if (shouldUpdate) {
+          await db.collection("checkbox_progress").findOneAndUpdate(
+            { 
+              session_id: session._id,
+              criteria_id: criterion._id,
+              group_number: groupNumber  // Add group_number to the query
+            },
+            {
+              $set: {
+                completed: newStatus === 'green', // Only mark as completed if green
+                quote: newQuote, // No quote for grey status
+                status: newStatus,
+                completed_at: now,
+                group_number: groupNumber  // Ensure group_number is set
+              }
+            },
+            { upsert: true }
+          );
+          
+          // Emit using both stable DB criteria_id and display index to avoid off-by-one errors
+          progressUpdates.push({
+            criteriaId: match.criteria_index,
+            criteriaDbId: criterion._id,
+            description: criterion.description,
+            completed: match.status === 'green',
+            quote: match.quote,
+            status: match.status
+          });
+          
+          console.log(`📋 Checkbox update for criteria idx=${match.criteria_index} (_id=${criterion._id}): "${match.quote}" - STATUS: ${match.status}`);
+        } else {
+          console.log(`📋 Criteria ${match.criteria_index} already completed with quote: "${existingProgress.quote}" - skipping update`);
+        }
       }
     }
     
@@ -1826,10 +1953,50 @@ app.post("/api/checkbox/process", express.json(), async (req, res) => {
     // Send checkbox updates to admin
     io.to(sessionCode).emit("admin_update", {
       group: groupNumber,
-      latestTranscript: transcriptionText,
+      latestTranscript: transcript,
       checkboxUpdates: progressUpdates,
       isActive: true
     });
+    
+    // NEW: Also emit full checklist state to both teachers and students
+    // Get the current release state from database
+    const checkboxSessionData = await db.collection("checkbox_sessions").findOne({ session_id: session._id });
+    const isReleased = checkboxSessionData?.released_groups?.[groupNumber] || false;
+    
+    // Get all current progress for this group
+    const allProgress = await db.collection("checkbox_progress").find({
+      session_id: session._id,
+      group_number: groupNumber
+    }).toArray();
+    
+    // Build complete checklist state
+    const checklistData = {
+      groupNumber: groupNumber,
+      criteria: criteria.map((c, idx) => {
+        const progress = allProgress.find(p => p.criteria_id === c._id);
+        return {
+          id: idx, // stable index based on sorted order_index
+          dbId: c._id,
+          description: c.description,
+          rubric: c.rubric || '',
+          status: progress?.status || 'grey',
+          completed: progress?.completed || false,
+          quote: progress?.quote || null
+        };
+      }),
+      scenario: checkboxSession?.scenario || "",
+      timestamp: Date.now(),
+      isReleased: isReleased,  // Controls student visibility
+      sessionCode: sessionCode
+    };
+    
+    console.log(`📨 Emitting checklist state to all (released: ${isReleased})`);
+    
+    // Emit to everyone in session
+    io.to(sessionCode).emit('checklist_state', checklistData);
+    io.to(`${sessionCode}-${groupNumber}`).emit('checklist_state', checklistData);
+    // Cache latest state
+    latestChecklistState.set(`${sessionCode}-${groupNumber}`, checklistData);
     
     res.json({
       success: true,
@@ -1863,7 +2030,7 @@ app.get("/api/checkbox/:sessionCode", async (req, res) => {
     // Get criteria
     const criteria = await db.collection("checkbox_criteria")
       .find({ session_id: session._id })
-      .sort({ created_at: 1 })
+      .sort({ order_index: 1, created_at: 1 })
       .toArray();
     
     // Get progress for each criterion
@@ -2229,6 +2396,9 @@ io.on("connection", socket => {
   // Attach buffer to socket for auto-summary access
   socket.localBuf = localBuf;
 
+  // Timestamp helper for logs
+  function ts() { return new Date().toISOString(); }
+
   // Admin joins session room
   socket.on("admin_join", ({ code }) => {
     try {
@@ -2242,7 +2412,7 @@ io.on("connection", socket => {
 
   socket.on("join", async ({ code, group }) => {
     try {
-      console.log(`👋 Socket ${socket.id} attempting to join session ${code}, group ${group}`);
+      console.log(`[${ts()}] 👋 Socket ${socket.id} attempting to join session ${code}, group ${group}`);
       
       // Check memory only - no database lookup
       const sessionState = activeSessions.get(code);
@@ -2288,16 +2458,16 @@ io.on("connection", socket => {
       
       // Send different status based on session state
       if (sessionState.active) {
-        socket.emit("joined", { code, group, status: "recording" });
+        socket.emit("joined", { code, group, status: "recording", interval: sessionState.interval || 30000 });
         console.log(`✅ Socket ${socket.id} joined ACTIVE session ${code}, group ${group}`);
       } else {
-        socket.emit("joined", { code, group, status: "waiting" });
+        socket.emit("joined", { code, group, status: "waiting", interval: sessionState.interval || 30000 });
         console.log(`✅ Socket ${socket.id} joined INACTIVE session ${code}, group ${group} - waiting for start`);
       }
       
       // Notify admin about student joining
       socket.to(code).emit("student_joined", { group, socketId: socket.id });
-      console.log(`📢 Notified admin about student joining group ${group}`);
+      console.log(`[${ts()}] 📢 Notified admin about student joining group ${group}`);
       
     } catch (err) {
       console.error("❌ Error joining session:", err);
@@ -2312,13 +2482,13 @@ io.on("connection", socket => {
 
   // Handle heartbeat to keep connection alive (especially for background recording)
   socket.on("heartbeat", ({ session, group }) => {
-    console.log(`💓 Heartbeat from session ${session}, group ${group} (socket: ${socket.id})`);
+    console.log(`[${ts()}] 💓 Heartbeat from session ${session}, group ${group} (socket: ${socket.id})`);
     socket.emit("heartbeat_ack");
   });
 
   // Handle admin heartbeat
   socket.on("admin_heartbeat", ({ sessionCode }) => {
-    console.log(`💓 Admin heartbeat from session ${sessionCode} (socket: ${socket.id})`);
+    console.log(`[${ts()}] 💓 Admin heartbeat from session ${sessionCode} (socket: ${socket.id})`);
     socket.emit("admin_heartbeat_ack");
   });
 
@@ -2341,7 +2511,7 @@ io.on("connection", socket => {
 
   socket.on("disconnect", () => {
     if (sessionCode && groupNumber) {
-    console.log(`🔌 Socket ${socket.id} disconnected from session ${sessionCode}, group ${groupNumber}`);
+    console.log(`[${ts()}] 🔌 Socket ${socket.id} disconnected from session ${sessionCode}, group ${groupNumber}`);
       
       // Notify admin about student leaving
       socket.to(sessionCode).emit("student_left", { group: groupNumber, socketId: socket.id });
@@ -2359,6 +2529,179 @@ io.on("connection", socket => {
     if (sessionCode && groupNumber) {
       const groupKey = `${sessionCode}-${groupNumber}`;
       processingGroups.delete(groupKey);
+    }
+  });
+
+  // Handle student disconnection
+  socket.on('disconnect', () => {
+    console.log(`🔌 Socket disconnected: ${socket.id}`);
+    
+    // Socket.IO automatically handles room cleanup when sockets disconnect
+    // No manual cleanup needed for socket rooms
+    // activeSessions only stores session metadata, not socket collections
+  });
+
+  // Debug helper - tell client what rooms they're in
+  socket.on('get_my_rooms', () => {
+    console.log(`🔍 Socket ${socket.id} requested room info`);
+    console.log(`🔍 Socket ${socket.id} is in rooms:`, Array.from(socket.rooms));
+    socket.emit('room_info', {
+      socketId: socket.id,
+      rooms: Array.from(socket.rooms)
+    });
+  });
+
+  // Handle checklist release to students
+  socket.on('release_checklist', async (data) => {
+    try {
+      console.log(`📤 Teacher releasing checklist to Group ${data.groupNumber} in session ${data.sessionCode}`);
+      
+      const cacheKey = `${data.sessionCode}-${Number(data.groupNumber)}`;
+      const cached = latestChecklistState.get(cacheKey);
+      if (cached) {
+        console.log(`🗄️ Using cached checklist_state as merge source (cached ${cached.criteria?.length || 0} items)`);
+      }
+      
+      // Get the session from database to get its _id
+      const session = await db.collection("sessions").findOne({ code: data.sessionCode });
+      if (!session) {
+        console.error(`❌ Session ${data.sessionCode} not found in database`);
+        return;
+      }
+      
+      // Update the release flag in database
+      await db.collection("checkbox_sessions").updateOne(
+        { session_id: session._id },
+        { 
+          $set: { 
+            [`released_groups.${data.groupNumber}`]: true,
+            [`release_timestamps.${data.groupNumber}`]: Date.now()
+          }
+        },
+        { upsert: true }
+      );
+      
+      console.log(`✅ Release flag set for group ${data.groupNumber} in session ${data.sessionCode}`);
+      
+      // Build authoritative checklist state from DB progress for this group
+      const checkboxSession = await db.collection("checkbox_sessions").findOne({ session_id: session._id });
+      const dbCriteria = await db.collection("checkbox_criteria")
+        .find({ session_id: session._id })
+        .sort({ order_index: 1, created_at: 1 })
+        .toArray();
+      const progress = await db.collection("checkbox_progress")
+        .find({ session_id: session._id, group_number: Number(data.groupNumber) })
+        .toArray();
+      
+      // Fallback: if DB has no criteria yet (race on first start), use teacher-provided payload
+      const incomingCriteria = Array.isArray(data.criteria) ? data.criteria : [];
+      let finalCriteria;
+      if (!dbCriteria || dbCriteria.length === 0) {
+        console.warn(`⚠️ No DB criteria found for session ${data.sessionCode}. Falling back to teacher payload with ${incomingCriteria.length} items.`);
+        finalCriteria = incomingCriteria.map((c, idx) => ({
+          id: Number(c.id ?? idx),
+          dbId: c.dbId,
+          description: c.description,
+          rubric: c.rubric || '',
+          status: c.status || 'grey',
+          completed: c.status === 'green' ? true : Boolean(c.completed),
+          quote: c.quote ?? null
+        }));
+      } else {
+        // Build from DB first
+        finalCriteria = dbCriteria.map((c, idx) => {
+          const prog = progress.find(p => p.criteria_id === c._id);
+          return {
+            id: idx,
+            dbId: c._id,
+            description: c.description,
+            rubric: c.rubric || '',
+            status: prog?.status || 'grey',
+            completed: prog?.completed || (prog?.status === 'green') || false,
+            quote: prog?.quote || null
+          };
+        });
+        // Merge in teacher payload to avoid initial all-grey if DB progress isn't there yet
+        if (incomingCriteria.length > 0) {
+          const byDbId = new Map(incomingCriteria.filter(x => x.dbId).map(x => [x.dbId, x]));
+          const byIdx = new Map(incomingCriteria.map(x => [Number(x.id), x]));
+          finalCriteria = finalCriteria.map(item => {
+            const fromTeacher = (item.dbId && byDbId.get(item.dbId)) || byIdx.get(Number(item.id));
+            if (!fromTeacher) return item;
+            const teacherStatus = fromTeacher.status || 'grey';
+            const preferTeacher = (teacherStatus === 'green') || (item.status === 'grey' && teacherStatus !== 'grey');
+            if (preferTeacher) {
+              return {
+                ...item,
+                status: teacherStatus,
+                completed: teacherStatus === 'green' ? true : item.completed,
+                quote: (fromTeacher.quote && fromTeacher.quote !== 'null') ? fromTeacher.quote : item.quote
+              };
+            }
+            return item;
+          });
+        }
+        // Merge in cached latest state to avoid blanks on first release
+        if (cached && Array.isArray(cached.criteria) && cached.criteria.length > 0) {
+          const cacheByIdx = new Map(cached.criteria.map(x => [Number(x.id), x]));
+          finalCriteria = finalCriteria.map(item => {
+            const fromCache = cacheByIdx.get(Number(item.id));
+            if (!fromCache) return item;
+            const cacheStatus = fromCache.status || 'grey';
+            const preferCache = (cacheStatus === 'green') || (item.status === 'grey' && cacheStatus !== 'grey');
+            if (preferCache) {
+              return {
+                ...item,
+                status: cacheStatus,
+                completed: cacheStatus === 'green' ? true : item.completed,
+                quote: (fromCache.quote && fromCache.quote !== 'null') ? fromCache.quote : item.quote
+              };
+            }
+            return item;
+          });
+        }
+      }
+      
+      // Ensure stable ordering by numeric id
+      finalCriteria = (finalCriteria || []).slice().sort((a, b) => Number(a.id) - Number(b.id));
+      if (!finalCriteria || finalCriteria.length === 0) {
+        // Last resort: if everything failed, use cached criteria entirely
+        if (cached && Array.isArray(cached.criteria) && cached.criteria.length > 0) {
+          console.warn('⚠️ DB and teacher payload empty, falling back to cached checklist state entirely');
+          finalCriteria = cached.criteria.map(c => ({
+            id: Number(c.id),
+            dbId: c.dbId,
+            description: c.description,
+            rubric: c.rubric || '',
+            status: c.status || 'grey',
+            completed: Boolean(c.completed),
+            quote: c.quote ?? null
+          }));
+        }
+      }
+      
+      const checklistData = {
+        sessionCode: data.sessionCode,
+        groupNumber: Number(data.groupNumber),
+        criteria: finalCriteria,
+        scenario: checkboxSession?.scenario || data.scenario || "",
+        timestamp: Date.now(),
+        isReleased: true
+      };
+      
+      console.log('📤 Emitting authoritative released checklist:', {
+        group: checklistData.groupNumber,
+        criteriaCount: checklistData.criteria.length,
+        sampleStatuses: checklistData.criteria.map(c => c.status).slice(0, 7)
+      });
+      
+      // Emit to everyone - students will now see it because isReleased is true
+      io.to(data.sessionCode).emit('checklist_state', checklistData);
+      io.to(`${data.sessionCode}-${data.groupNumber}`).emit('checklist_state', checklistData);
+      
+      console.log(`✅ Checklist released to session ${data.sessionCode} for Group ${data.groupNumber}`);
+    } catch (error) {
+      console.error('❌ Error handling checklist release:', error);
     }
   });
 });
@@ -2511,9 +2854,9 @@ async function summarise(text, customPrompt) {
     const basePrompt = customPrompt || "Summarise the following classroom discussion in ≤6 clear bullet points:";
     
   const body = {
-      model: "claude-3-haiku-20240307",
-      max_tokens: 256,
-      temperature: 0.2,
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 800, // Reduced from 2000 - ultra-efficient prompt needs fewer tokens
+      temperature: 0, // Set to 0 for maximum consistency
     messages: [
       {
           role: "user",
@@ -2582,7 +2925,7 @@ Respond with JSON in this exact format:
 Levels: 1=main topic, 2=subtopic, 3=sub-subtopic/example`;
 
     const body = {
-      model: "claude-3-haiku-20240307",
+      model: "claude-sonnet-4-20250514",
       max_tokens: 300,
       temperature: 0.3,
       messages: [
@@ -2619,9 +2962,9 @@ Levels: 1=main topic, 2=subtopic, 3=sub-subtopic/example`;
   }
 }
 
-async function processCheckboxTranscript(text, criteria, scenario = "") {
+async function processCheckboxTranscript(text, criteria, scenario = "", strictness = 2, existingProgress = []) {
   try {
-    console.log(`☑️ Processing transcript for checkbox matching...`);
+    console.log(`☑️ Processing transcript for 3-state checkbox evaluation (strictness: ${strictness})...`);
     
     // Check if API key is available
     const apiKey = process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_KEY;
@@ -2633,70 +2976,199 @@ async function processCheckboxTranscript(text, criteria, scenario = "") {
       const mockMatches = [];
       
       // Check for some obvious matches in the text for demonstration
-      if (text.toLowerCase().includes('caco₃') || text.toLowerCase().includes('calcium carbonate')) {
+      if (text.toLowerCase().includes('back titration') && text.toLowerCase().includes('not soluble')) {
         mockMatches.push({
           criteria_index: 0,
-          quote: "CaCO₃ is not soluble in water"
+          quote: "back titration is used because CaCO3 is not soluble",
+          status: "green"
         });
       }
       
-      if (text.toLowerCase().includes('back titration')) {
-        mockMatches.push({
-          criteria_index: 1,
-          quote: "we need to use back titration"
-        });
-      }
-      
-      if (text.toLowerCase().includes('hcl') || text.toLowerCase().includes('hydrochloric acid')) {
-        mockMatches.push({
-          criteria_index: 2,
-          quote: "CaCO₃ reacts with HCl to form salt, water, and carbon dioxide"
-        });
-      }
+      // Include existing GREEN criteria in the response
+      existingProgress.forEach((progress, index) => {
+        if (progress && progress.status === 'green') {
+          mockMatches.push({
+            criteria_index: index,
+            quote: progress.quote,
+            status: "green"
+          });
+        }
+      });
       
       return {
         matches: mockMatches
       };
     }
     
-    console.log(`✅ Using Anthropic API for transcript analysis`);
-    console.log(`📋 Processing against ${criteria.length} criteria (indices 0-${criteria.length - 1})`);
+    console.log(`✅ Using Anthropic API for ${strictness === 1 ? 'LENIENT' : strictness === 2 ? 'MODERATE' : 'STRICT'} transcript analysis`);
     
-    // Show criteria with 0-based indexing to match what we expect in the response
-    const criteriaText = criteria.map((c, i) => `${i}. ${c.description}`).join('\n');
+    // Filter out already GREEN criteria from evaluation
+    const criteriaToEvaluate = [];
+    const greenCriteria = [];
+    
+    criteria.forEach((c, i) => {
+      const progress = existingProgress[i];
+      if (progress && progress.status === 'green') {
+        // This criterion is already GREEN - don't re-evaluate
+        greenCriteria.push({
+          criteria_index: i,
+          quote: progress.quote,
+          status: "green"
+        });
+        console.log(`📋 Skipping evaluation for criteria ${i} - already GREEN with quote: "${progress.quote}"`);
+      } else {
+        // This criterion needs evaluation
+        criteriaToEvaluate.push({ ...c, originalIndex: i });
+      }
+    });
+    
+    console.log(`📋 Evaluating ${criteriaToEvaluate.length} criteria (skipping ${greenCriteria.length} already GREEN)`);
+    
+    // If all criteria are already GREEN, just return them
+    if (criteriaToEvaluate.length === 0) {
+      console.log(`✅ All criteria already GREEN - no evaluation needed`);
+      return {
+        matches: greenCriteria
+      };
+    }
+    
+    // Create detailed criteria text with rubrics for evaluation
+    const criteriaText = criteriaToEvaluate.map((c, i) => {
+      return `${c.originalIndex}. ${c.description}\n   RUBRIC: ${c.rubric}`;
+    }).join('\n\n');
     
     const scenarioContext = scenario ? `\nDiscussion Context/Scenario: ${scenario}\n` : '';
     
-    const prompt = `You are analyzing classroom discussion against a marking rubric/checklist.${scenarioContext}
-Rubric criteria (0-based indexing):
-${criteriaText}
+    // Adjust evaluation framework based on strictness level
+    let evaluationFramework = '';
+    
+    if (strictness === 1) { // Lenient
+      evaluationFramework = `
+🟢 GREEN STATUS - Award when:
+• Student demonstrates general understanding of the concept
+• The main idea is correct, even if some details are missing
+• Accept partial explanations that show conceptual grasp
+• Be generous with interpretations - if they're on the right track, it's GREEN
+• Accept different ways of expressing the same concept
 
-New transcript: "${text}"
+🔴 RED STATUS - Award when:
+• Student mentions the topic but shows fundamental misunderstanding
+• Major conceptual errors are present
+• The core idea is wrong, even if they tried
 
-Analyze which criteria (if any) are demonstrated or discussed in this transcript. 
+⚪ GREY STATUS - Award when:
+• The topic is NOT discussed at all
+• No evidence exists that the student engaged with this concept
+• Set quote to null for grey items`;
+    } else if (strictness === 3) { // Strict
+      evaluationFramework = `
+🟢 GREEN STATUS - Award ONLY when:
+• Student demonstrates COMPLETE and PRECISE understanding
+• ALL rubric requirements must be explicitly addressed
+• The explanation must be thorough and accurate
+• Every detail specified in the rubric must be present
+• No partial credit - it's either fully correct or not
 
-IMPORTANT CONSTRAINTS:
-- You must respond with ONLY valid JSON in this exact format
-- Only use criteria_index values from 0 to ${criteria.length - 1} (these are the only valid indices)
-- Do not invent or hallucinate criteria that don't exist
-- Only include criteria with high confidence
+🔴 RED STATUS - Award when:
+• Student attempts the topic but ANY rubric requirement is missing
+• Even minor inaccuracies or omissions result in RED
+• Partial understanding is still RED if not complete
 
-{
-  "matches": [
-    {
-      "criteria_index": 0,
-      "quote": "exact quote from transcript that matches this criterion"
+⚪ GREY STATUS - Award when:
+• The topic is NOT discussed at all
+• No evidence exists that the student engaged with this concept
+• Set quote to null for grey items`;
+    } else { // Moderate (default)
+      evaluationFramework = `
+🟢 GREEN STATUS - Award ONLY when:
+• Student demonstrates understanding of BOTH the label concept AND the rubric requirements
+• The RUBRIC requirements (in parentheses) MUST be addressed (even if expressed differently)
+• Accept different ways of expressing the same concept:
+  - "0.1 cm³", "0.10 cm cube", "0.1 cubic centimeters" all mean the same thing
+  - "2 consistent results" = "two consistent results" = "after 2 consistent titrations"
+  - Numbers can be expressed as digits or words
+• Their explanation must align with BOTH the label AND the specific rubric details
+• Accept phonetic variations (e.g., "metal orange" = "methyl orange") but require conceptual accuracy
+
+🔴 RED STATUS - Award when:
+• Student mentions the topic/label but FAILS to address the rubric requirements
+• Student attempts the concept but misses key rubric details
+• Student shows partial understanding but lacks the specific rubric content
+• They demonstrate engagement but don't meet the rubric criteria
+• IMPORTANT: If they mention WRONG information (e.g., "10 consistent results" instead of "2"), mark as RED
+
+⚪ GREY STATUS - Award when:
+• The topic is NOT discussed at all
+• No evidence exists that the student engaged with this concept
+• Set quote to null for grey items`;
     }
-  ]
+    
+    const prompt = `You are an expert educational evaluator analyzing student discussion transcripts against specific learning objectives. Your task is to provide precise, consistent evaluations using a 3-state system.
+
+${strictness === 1 ? 'EVALUATION MODE: LENIENT - Be generous and focus on conceptual understanding' : 
+  strictness === 3 ? 'EVALUATION MODE: STRICT - Require complete and precise answers with all details' : 
+  'EVALUATION MODE: MODERATE - Balance conceptual understanding with important details'}
+
+INDEXED OBJECTIVES (use the IDX numbers exactly as shown):
+${criteriaToEvaluate.map(c => `IDX ${c.originalIndex}: ${c.description}\nRUBRIC: ${c.rubric}`).join('\n\n')}
+
+IMPORTANT: When you output matches, the "criteria_index" value MUST be one of the IDX numbers shown above. Do not invent or shift indices. If multiple objectives seem possible, choose the single best match by rubric alignment.
+
+STUDENT DISCUSSION TRANSCRIPT:
+"${text}"
+
+${scenarioContext}
+
+EVALUATION FRAMEWORK:
+${evaluationFramework}
+
+CRITICAL EVALUATION RULES:
+
+1. ${strictness === 1 ? 'FLEXIBLE MATCHING' : strictness === 3 ? 'EXACT MATCHING' : 'INTELLIGENT MATCHING'}:
+   ${strictness === 1 ? 
+   `- Accept any reasonable interpretation of the concept
+   - Partial understanding is often sufficient for GREEN
+   - Focus on whether they grasp the main idea` : 
+   strictness === 3 ? 
+   `- Require precise and complete answers
+   - All rubric details must be explicitly stated
+   - No assumptions or generous interpretations` :
+   `- The rubric content is important but can be expressed differently
+   - Accept equivalent expressions and terminology
+   - Look for the MEANING, not exact wording`}
+
+2. TRANSCRIPTION ERROR TOLERANCE AND SYNONYMS:
+   - Accept phonetically similar terms (metal orange ≈ methyl orange)
+   - Units/expressions equivalence: cm³ = cm3 = cm cubed = cubic centimeters
+   - Chemical/name equivalence: HCl = hydrochloric acid; CaCO3 = calcium carbonate; insoluble ≈ not soluble
+   - Common ASR artifacts: "title volume" ≈ "titre volume"; "titer" ≈ "titre"
+   - Accept digit/word variations (2 = two, 0.1 = 0.10)
+   - Focus on conceptual understanding over exact pronunciation
+
+3. SPECIFICITY:
+   - Map each quote to ONE best objective (do not duplicate a quote across objectives)
+   - Prefer the objective whose rubric terms most closely appear in the quote
+
+4. QUOTE SELECTION:
+   - For GREEN/RED, include a short exact quote that demonstrates why
+   - For GREY, set quote to null
+
+RESPONSE FORMAT (JSON ONLY):
+{
+  "matches": [ { "criteria_index": <IDX>, "quote": <string|null>, "status": "green|red|grey", "why": <string|null> } ]
 }
 
-Extract the most relevant quote from the transcript for each match.
-RESPOND WITH ONLY JSON, NO OTHER TEXT.`;
+QUALITY CHECK:
+- Use only the provided IDX values
+- No explanations outside JSON
+- Prefer the objective with the strongest rubric term overlap with the quote
+
+Begin evaluation now:`;
 
     const body = {
-      model: "claude-3-haiku-20240307",
-      max_tokens: 800,
-      temperature: 0.1,
+      model: "claude-sonnet-4-20250514", // Using Claude Sonnet 4 as requested
+      max_tokens: 2000, // Increased for comprehensive prompt and detailed analysis
+      temperature: 0, // Set to 0 for maximum consistency
       messages: [
         {
           role: "user",
@@ -2723,12 +3195,12 @@ RESPOND WITH ONLY JSON, NO OTHER TEXT.`;
     const response = await res.json();
     const responseText = response.content?.[0]?.text?.trim();
     
-    console.log(`🔍 Anthropic response text: "${responseText?.substring(0, 200)}..."`);
+    console.log(`🔍 Anthropic response text: "${responseText?.substring(0, 300)}..."`);
     
     let result;
     try {
       // Try to parse the JSON response
-      result = JSON.parse(responseText ?? '{"matches": [], "reason": "empty response"}');
+      result = JSON.parse(responseText ?? '{"matches": []}');
     } catch (parseError) {
       console.error("❌ JSON parse error:", parseError.message);
       console.error("🔍 Raw response text:", responseText);
@@ -2741,10 +3213,10 @@ RESPOND WITH ONLY JSON, NO OTHER TEXT.`;
           console.log("✅ Recovered JSON from wrapped response");
         } catch (secondError) {
           console.error("❌ Could not parse extracted JSON either");
-          result = { matches: [], reason: "JSON parsing failed" };
+          result = { matches: [] };
         }
       } else {
-        result = { matches: [], reason: "No JSON found in response" };
+        result = { matches: [] };
       }
     }
     
@@ -2759,13 +3231,41 @@ RESPOND WITH ONLY JSON, NO OTHER TEXT.`;
       result.matches = [];
     }
     
-    // Validate each match object
+    // Validate each match object with 'why' rationale
     result.matches = result.matches.filter(match => {
+      // Coerce criteria_index if Anthropic returns string like 'IDX 6' or '6'
+      if (typeof match?.criteria_index === 'string') {
+        const m = match.criteria_index.match(/(\d+)/);
+        if (m) {
+          match.criteria_index = Number(m[1]);
+        }
+      }
       if (typeof match !== 'object' || 
           typeof match.criteria_index !== 'number' ||
-          typeof match.quote !== 'string') {
+          typeof match.status !== 'string') {
         console.warn("⚠️ Invalid match object structure:", match);
         return false;
+      }
+      
+      // Validate quote based on status: grey should have null, others should have string
+      if (match.status === 'grey') {
+        if (match.quote !== null && match.quote !== undefined) {
+          console.warn(`⚠️ Grey status should have null quote, got: ${match.quote}`);
+          match.quote = null; // Fix it rather than reject
+        }
+        if (match.why === undefined) match.why = null;
+      } else {
+        if (typeof match.quote !== 'string' || match.quote.trim() === '') {
+          console.warn(`⚠️ ${match.status} status must have non-empty string quote, got:`, match.quote);
+          return false;
+        }
+        if (typeof match.why !== 'string' || match.why.trim() === '') {
+          // Fill a concise default if missing
+          match.why = 'Quote aligns with rubric terms for this objective.';
+        }
+        if (match.why.length > 180) {
+          match.why = match.why.slice(0, 180);
+        }
       }
       
       // Validate criteria_index is within valid range
@@ -2774,11 +3274,156 @@ RESPOND WITH ONLY JSON, NO OTHER TEXT.`;
         return false;
       }
       
+      // Validate status is one of the allowed values
+      if (!['green', 'red', 'grey'].includes(match.status)) {
+        console.warn(`⚠️ Invalid status "${match.status}". Must be green, red, or grey`);
+        return false;
+      }
+      
       return true;
     });
     
-    console.log(`✅ Checkbox processing successful: ${result.matches.length} valid matches found`);
-    return result;
+    // Detect and warn about duplicate quotes (same quote assigned to multiple criteria)
+    const quoteMap = new Map();
+    result.matches.forEach(match => {
+      if (match.quote && match.status !== 'grey') {
+        const trimmedQuote = match.quote.trim();
+        if (quoteMap.has(trimmedQuote)) {
+          console.warn(`🚨 DUPLICATE QUOTE DETECTED: Quote "${trimmedQuote.substring(0, 50)}..." assigned to multiple criteria: ${quoteMap.get(trimmedQuote)} and ${match.criteria_index}`);
+        } else {
+          quoteMap.set(trimmedQuote, match.criteria_index);
+        }
+      }
+    });
+    
+    // If we have duplicate quotes, mark all but the first as grey
+    if (quoteMap.size < result.matches.filter(m => m.status !== 'grey').length) {
+      console.warn(`🔧 Fixing duplicate quotes by marking duplicates as grey`);
+      const seenQuotes = new Set();
+      result.matches.forEach(match => {
+        if (match.quote && match.status !== 'grey') {
+          const trimmedQuote = match.quote.trim();
+          if (seenQuotes.has(trimmedQuote)) {
+            console.warn(`🔧 Marking criteria ${match.criteria_index} as grey due to duplicate quote`);
+            match.status = 'grey';
+            match.quote = null;
+          } else {
+            seenQuotes.add(trimmedQuote);
+          }
+        }
+      });
+    }
+    
+    // Dynamic rerouting based on rubric-driven token overlap (no hardcoded categories)
+    const norm = (s) => (s || '').toLowerCase()
+      .replace(/title volume/g, 'titre volume')
+      .replace(/titer/g, 'titre')
+      .replace(/cm\^?3|cubic\s*cent(imetre|imeter)s?|cm\s*cubed/g, 'cm3')
+      .replace(/hcl/g, 'hydrochloric acid');
+
+    const STOPWORDS = new Set(['the','and','for','that','this','with','will','must','have','has','are','was','were','can','could','should','would','to','of','in','on','at','by','from','or','as','be','is','a','an','it','we','you','they','between']);
+    const tokenize = (s) => norm(s)
+      .replace(/[^a-z0-9\.\s]/g,' ')
+      .split(/\s+/)
+      .filter(w => w && !STOPWORDS.has(w) && w.length > 2);
+
+    const criterionTokens = criteria.map(c => new Set(tokenize(`${c.description} ${c.rubric}`)));
+
+    const scoreOverlap = (quote, idx) => {
+      if (!quote) return 0;
+      const qt = tokenize(quote);
+      const dict = criterionTokens[idx];
+      let score = 0;
+      for (const t of qt) if (dict.has(t)) score++;
+      return score;
+    };
+
+    result.matches = result.matches.map(m => {
+      if (!m.quote || m.status === 'grey') return m;
+      const current = m.criteria_index;
+      let bestIdx = current;
+      let bestScore = scoreOverlap(m.quote, current);
+      for (let i = 0; i < criteria.length; i++) {
+        const sc = scoreOverlap(m.quote, i);
+        if (sc > bestScore) { bestScore = sc; bestIdx = i; }
+      }
+      // Reroute only when there is a clear improvement and current match is weak
+      if (bestIdx !== current && bestScore >= Math.max(2, bestScore - 0) && bestScore >= (scoreOverlap(m.quote, current) + 2)) {
+        console.log(`🔀 Re-routing match from idx=${current} to idx=${bestIdx} based on token overlap (old=${scoreOverlap(m.quote, current)}, new=${bestScore})`);
+        return { ...m, criteria_index: bestIdx };
+      }
+      return m;
+    });
+
+    // Cleanup duplicate quotes after rerouting
+    (function cleanupDuplicates() {
+      const seen = new Map();
+      result.matches.forEach(m => {
+        if (!m.quote || m.status === 'grey') return;
+        const key = m.quote.trim();
+        if (!seen.has(key)) { seen.set(key, m.criteria_index); return; }
+        if (seen.get(key) !== m.criteria_index) {
+          console.warn(`🔧 Removing duplicate quote after reroute from idx=${m.criteria_index}`);
+          m.status = 'grey';
+          m.quote = null;
+        }
+      });
+    })();
+    
+    console.log(`✅ 3-state checkbox processing successful: ${result.matches.length} valid matches found`);
+    console.log(`📊 Status breakdown:`, result.matches.reduce((acc, match) => {
+      acc[match.status] = (acc[match.status] || 0) + 1;
+      return acc;
+    }, {}));
+    
+    // Build complete matches array for ALL criteria
+    const allMatches = [];
+    
+    // Process each criterion to ensure we have a match for every one
+    criteria.forEach((criterion, index) => {
+      // Check if this criterion was in greenCriteria (preserved)
+      const greenMatch = greenCriteria.find(m => m.criteria_index === index);
+      if (greenMatch) {
+        allMatches.push(greenMatch);
+        return;
+      }
+      
+      // Check if this criterion was in the AI evaluation results
+      const aiMatch = result.matches.find(m => m.criteria_index === index);
+      if (aiMatch) {
+        allMatches.push(aiMatch);
+        return;
+      }
+      
+      // If not found in either, preserve the existing status or default to grey
+      const existingProg = existingProgress[index];
+      if (existingProg) {
+        // Preserve existing RED or GREY status that wasn't re-evaluated
+        allMatches.push({
+          criteria_index: index,
+          quote: existingProg.quote || null,
+          status: existingProg.status || 'grey'
+        });
+      } else {
+        // No existing progress, default to grey
+        allMatches.push({
+          criteria_index: index,
+          quote: null,
+          status: 'grey'
+        });
+      }
+    });
+    
+    // Sort by criteria_index for consistent ordering
+    allMatches.sort((a, b) => a.criteria_index - b.criteria_index);
+    
+    console.log(`📊 Complete results: ${allMatches.length} total matches for ${criteria.length} criteria`);
+    console.log(`📊 Final status breakdown:`, allMatches.reduce((acc, match) => {
+      acc[match.status] = (acc[match.status] || 0) + 1;
+      return acc;
+    }, {}));
+    
+    return { matches: allMatches };
   } catch (err) {
     console.error("❌ Checkbox processing error:", err);
     return { matches: [] };
@@ -3088,6 +3733,70 @@ app.post("/api/transcribe-chunk", upload.single('file'), async (req, res) => {
 // Helper function to process transcription for a group
 async function processTranscriptionForGroup(session, group, transcriptionText, result, now, sessionCode, groupNumber) {
   try {
+    // Ensure 'now' is defined if not passed
+    if (!now) {
+      now = Date.now();
+    }
+    
+    // Filter out background noise, music, and non-educational content
+    const lowerText = transcriptionText.toLowerCase().trim();
+    const noisePatterns = [
+      /^\(.*music.*\)$/,
+      /^\(.*background.*\)$/,
+      /^\(.*noise.*\)$/,
+      /^\(.*chattering.*\)$/,
+      /^\(.*wind.*blowing.*\)$/,
+      /^\(.*keyboard.*\)$/,
+      /^\(.*clicking.*\)$/,
+      /^\(.*typing.*\)$/,
+      /^\(.*computer.*\)$/,
+      /^testing,?\s*testing\.?$/,
+      /^what the hell/,
+      /^okay\.?\s*\(pauses?\)\s*okay/,
+      /^cualquiera que sea/,
+      /^배경 소음/,
+      /^기계음 소리/,
+      /^bis zum nächsten mal/,
+      /^bis dann/,
+      /^haus zu hause/,
+      /^kształcenie/,
+      /^klikanie/,
+      /^geräusch vom tippen/,
+      /^ronco de moto/,
+      /^\(.*sounds?\)$/,
+      /^\(.*audio.*\)$/,
+      /^\(.*mechanical.*\)$/
+    ];
+    
+    const isNoise = noisePatterns.some(pattern => pattern.test(lowerText)) ||
+                   lowerText.length < 15 || // Increased from 10 to 15 - too short to be meaningful
+                   /^[\(\)\s\.,!?]*$/.test(lowerText) || // Only punctuation/parentheses
+                   /^\([^)]*\)\s*\([^)]*\)$/.test(lowerText); // Only parenthetical descriptions
+    
+    if (isNoise) {
+      console.log(`🔇 Noise/background transcript (still logging to UI): "${transcriptionText.substring(0, 50)}..."`);
+      // Log minimal transcript entry for timeline
+      const transcriptId = uuid();
+      await db.collection("transcripts").insertOne({
+        _id: transcriptId,
+        group_id: group._id,
+        text: transcriptionText,
+        word_count: transcriptionText.split(' ').filter(w => w.trim().length > 0).length,
+        duration_seconds: 0,
+        created_at: now,
+        segment_number: Math.floor(now / (session.interval_ms || 30000)),
+        is_noise: true
+      });
+      // Emit to teacher so transcript list shows every update
+      io.to(sessionCode).emit("admin_update", {
+        group: groupNumber,
+        latestTranscript: transcriptionText,
+        checkboxUpdates: [],
+        isActive: true
+      });
+      return; // Do not run AI processing for noise
+    }
+    
     // Save the transcription segment
     const transcriptId = uuid();
     
@@ -3117,28 +3826,64 @@ async function processTranscriptionForGroup(session, group, transcriptionText, r
       const checkboxSession = await db.collection("checkbox_sessions").findOne({ session_id: session._id });
       const criteria = await db.collection("checkbox_criteria")
         .find({ session_id: session._id })
-        .sort({ created_at: 1 })
+        .sort({ order_index: 1, created_at: 1 })
         .toArray();
       
       if (criteria.length > 0) {
-        // Get recent transcripts from this interval (last 2 minutes worth)
-        const intervalStart = now - (session.interval_ms || 120000); // Use session interval or default to 2 min
+        // Get the 3 most recent transcripts for this group
+        const RECENT_CHUNKS_TO_ANALYZE = 3;
         const recentTranscripts = await db.collection("transcripts")
           .find({ 
-            group_id: group._id,
-            created_at: { $gte: intervalStart }
+            group_id: group._id
           })
-          .sort({ created_at: 1 })
+          .sort({ created_at: -1 }) // Sort descending to get most recent first
+          .limit(RECENT_CHUNKS_TO_ANALYZE - 1) // Get 2 previous chunks (current will be the 3rd)
           .toArray();
         
-        // Concatenate recent transcripts including the current one
-        const concatenatedText = recentTranscripts.map(t => t.text).join(' ') + ' ' + transcriptionText;
+        // Reverse to get chronological order (oldest to newest)
+        recentTranscripts.reverse();
         
-        console.log(`📋 Concatenating ${recentTranscripts.length + 1} recent transcripts for analysis`);
+        // Concatenate recent transcripts including the current one
+        const transcriptTexts = recentTranscripts.map(t => t.text);
+        transcriptTexts.push(transcriptionText); // Add current transcript as the most recent
+        const concatenatedText = transcriptTexts.join(' ');
+        
+        console.log(`📋 Concatenating ${transcriptTexts.length} recent transcripts for analysis`);
+        console.log(`📋 Transcript chunks: [${transcriptTexts.map(t => t.substring(0, 30) + '...').join('], [')}]`);
+        
+        // Get existing progress for this group to avoid re-evaluating GREEN criteria
+        const existingProgressRecords = await db.collection("checkbox_progress")
+          .find({ 
+            session_id: session._id,
+            group_number: groupNumber 
+          })
+          .toArray();
+        
+        // Build existing progress array indexed by criteria position
+        const existingProgress = [];
+        criteria.forEach((c, idx) => {
+          const progress = existingProgressRecords.find(p => p.criteria_id === c._id);
+          if (progress) {
+            existingProgress[idx] = {
+              status: progress.status,
+              quote: progress.quote,
+              completed: progress.completed
+            };
+          } else {
+            existingProgress[idx] = null;
+          }
+        });
+        
+        console.log(`📋 Found ${existingProgressRecords.length} existing progress records`);
+        const greenCount = existingProgress.filter(p => p && p.status === 'green').length;
+        if (greenCount > 0) {
+          console.log(`📋 Preserving ${greenCount} GREEN criteria from previous evaluations`);
+        }
         
         // Process through checkbox analysis with concatenated text
         const scenario = checkboxSession?.scenario || "";
-        const checkboxResult = await processCheckboxTranscript(concatenatedText.trim(), criteria, scenario);
+        const strictness = session.strictness || 2; // Get strictness from session, default to moderate
+        const checkboxResult = await processCheckboxTranscript(concatenatedText.trim(), criteria, scenario, strictness, existingProgress);
         
         // Log the checkbox processing result
         await db.collection("session_logs").insertOne({
@@ -3155,30 +3900,77 @@ async function processTranscriptionForGroup(session, group, transcriptionText, r
         for (const match of checkboxResult.matches) {
           const criterion = criteria[match.criteria_index];
           if (criterion) {
-            await db.collection("checkbox_progress").findOneAndUpdate(
-              { 
-                session_id: session._id,
-                criteria_id: criterion._id
-              },
-              {
-                $set: {
-                  completed: true,
-                  quote: match.quote,
-                  completed_at: now
-                }
-              },
-              { upsert: true }
-            );
-            
-            // Use the criteria_index (0, 1, 2, etc.) instead of MongoDB _id
-            progressUpdates.push({
-              criteriaId: match.criteria_index,  // This matches the frontend's c.id
-              description: criterion.description,
-              completed: true,
-              quote: match.quote
+            // Check existing progress to implement proper locking rules
+            const existingProgress = await db.collection("checkbox_progress").findOne({
+              session_id: session._id,
+              criteria_id: criterion._id
             });
             
-            console.log(`📋 Checkbox update for criteria ${match.criteria_index}: "${match.quote}"`);
+            // Implement locking rules:
+            // 1. GREEN stays GREEN forever (locked)
+            // 2. GREY has no quotes and can become RED or GREEN
+            // 3. RED can become GREEN but not GREY
+            let shouldUpdate = false;
+            let newStatus = match.status;
+            let newQuote = match.status === 'grey' ? null : match.quote; // Grey has no quotes
+            
+            if (!existingProgress) {
+              // No existing progress - always update
+              shouldUpdate = true;
+            } else if (existingProgress.status === 'green') {
+              // GREEN is locked - never update
+              console.log(`📋 Criteria ${match.criteria_index} already GREEN (locked) with quote: "${existingProgress.quote}" - skipping update`);
+              shouldUpdate = false;
+            } else if (existingProgress.status === 'grey') {
+              // GREY can become RED or GREEN
+              if (match.status === 'red' || match.status === 'green') {
+                shouldUpdate = true;
+                console.log(`📋 Criteria ${match.criteria_index} upgrading from GREY to ${match.status.toUpperCase()}`);
+              }
+            } else if (existingProgress.status === 'red') {
+              // RED can only become GREEN
+              if (match.status === 'green') {
+                shouldUpdate = true;
+                console.log(`📋 Criteria ${match.criteria_index} upgrading from RED to GREEN`);
+              } else {
+                console.log(`📋 Criteria ${match.criteria_index} staying RED - cannot downgrade to ${match.status.toUpperCase()}`);
+                shouldUpdate = false;
+              }
+            }
+            
+            if (shouldUpdate) {
+              await db.collection("checkbox_progress").findOneAndUpdate(
+                { 
+                  session_id: session._id,
+                  criteria_id: criterion._id,
+                  group_number: groupNumber  // Add group_number to the query
+                },
+                {
+                  $set: {
+                    completed: newStatus === 'green', // Only mark as completed if green
+                    quote: newQuote, // No quote for grey status
+                    status: newStatus,
+                    completed_at: now,
+                    group_number: groupNumber  // Ensure group_number is set
+                  }
+                },
+                { upsert: true }
+              );
+              
+              // Emit using both stable DB criteria_id and display index to avoid off-by-one errors
+              progressUpdates.push({
+                criteriaId: match.criteria_index,
+                criteriaDbId: criterion._id,
+                description: criterion.description,
+                completed: match.status === 'green',
+                quote: match.quote,
+                status: match.status
+              });
+              
+              console.log(`📋 Checkbox update for criteria idx=${match.criteria_index} (_id=${criterion._id}): "${match.quote}" - STATUS: ${match.status}`);
+            } else {
+              console.log(`📋 Criteria ${match.criteria_index} already completed with quote: "${existingProgress.quote}" - skipping update`);
+            }
           }
         }
         
@@ -3191,6 +3983,47 @@ async function processTranscriptionForGroup(session, group, transcriptionText, r
           checkboxUpdates: progressUpdates,
           isActive: true
         });
+        
+        
+        // NEW: Also emit full checklist state to both teachers and students
+        // Get the current release state from database
+        const checkboxSessionData = await db.collection("checkbox_sessions").findOne({ session_id: session._id });
+        const isReleased = checkboxSessionData?.released_groups?.[groupNumber] || false;
+        
+        // Get all current progress for this group
+        const allProgress = await db.collection("checkbox_progress").find({
+          session_id: session._id,
+          group_number: groupNumber
+        }).toArray();
+        
+        // Build complete checklist state
+        const checklistData = {
+          groupNumber: groupNumber,
+          criteria: criteria.map((c, idx) => {
+            const progress = allProgress.find(p => p.criteria_id === c._id);
+            return {
+              id: idx, // stable index based on sorted order_index
+              dbId: c._id,
+              description: c.description,
+              rubric: c.rubric || '',
+              status: progress?.status || 'grey',
+              completed: progress?.completed || false,
+              quote: progress?.quote || null
+            };
+          }),
+          scenario: checkboxSession?.scenario || "",
+          timestamp: Date.now(),
+          isReleased: isReleased,  // Controls student visibility
+          sessionCode: sessionCode
+        };
+        
+        console.log(`📨 Emitting checklist state to all (released: ${isReleased})`);
+        
+        // Emit to everyone in session
+        io.to(sessionCode).emit('checklist_state', checklistData);
+        io.to(`${sessionCode}-${groupNumber}`).emit('checklist_state', checklistData);
+        // Cache latest state
+        latestChecklistState.set(`${sessionCode}-${groupNumber}`, checklistData);
         
         // Send transcription to students in checkbox mode
         const roomName = `${sessionCode}-${groupNumber}`;
@@ -3226,8 +4059,10 @@ async function processTranscriptionForGroup(session, group, transcriptionText, r
     
     // Get custom prompt for this session
     let customPrompt = null;
-    const promptData = await db.collection("session_prompts").findOne({ session_id: session._id });
-    customPrompt = promptData?.prompt || null;
+    if (session) {
+      const promptData = await db.collection("session_prompts").findOne({ session_id: session._id });
+      customPrompt = promptData?.prompt || null;
+    }
     
     const summary = await summarise(cumulativeText, customPrompt);
     
@@ -3327,7 +4162,7 @@ async function processTestTranscript(sessionCode, transcript) {
   // Get criteria
   const criteria = await db.collection("checkbox_criteria")
     .find({ session_id: session._id })
-    .sort({ created_at: 1 })
+    .sort({ order_index: 1, created_at: 1 })
     .toArray();
 
   if (criteria.length === 0) {
@@ -3553,3 +4388,888 @@ app.delete("/api/sessions/:sessionCode", async (req, res) => {
   }
 });
 
+/* ---------- Comprehensive Data Access API ---------- */
+
+/* Get all sessions with comprehensive data across all modes */
+app.get("/api/data/sessions", async (req, res) => {
+  try {
+    const { limit = 20, offset = 0, mode = null } = req.query;
+    
+    console.log(`📊 Fetching comprehensive session data (limit: ${limit}, offset: ${offset}, mode: ${mode})`);
+    
+    // Build query filter
+    const query = {};
+    if (mode && ['summary', 'mindmap', 'checkbox'].includes(mode)) {
+      query.mode = mode;
+    }
+    
+    // Get sessions
+    const sessions = await db.collection("sessions")
+      .find(query)
+      .sort({ created_at: -1 })
+      .skip(parseInt(offset))
+      .limit(parseInt(limit))
+      .toArray();
+    
+    const enrichedSessions = [];
+    
+    for (const session of sessions) {
+      let sessionData = {
+        ...session,
+        groups: [],
+        totalTranscripts: 0,
+        totalStudents: 0,
+        duration: session.end_time ? session.end_time - session.start_time : null,
+        modeSpecificData: null
+      };
+      
+      // Get groups for this session
+      const groups = await db.collection("groups")
+        .find({ session_id: session._id })
+        .sort({ number: 1 })
+        .toArray();
+      
+      for (const group of groups) {
+        // Get transcripts for this group
+        const transcripts = await db.collection("transcripts")
+          .find({ group_id: group._id })
+          .sort({ created_at: 1 })
+          .toArray();
+        
+        // Get summary for this group
+        const summary = await db.collection("summaries")
+          .findOne({ group_id: group._id });
+        
+        sessionData.groups.push({
+          ...group,
+          transcriptCount: transcripts.length,
+          latestTranscript: transcripts.length > 0 ? transcripts[transcripts.length - 1] : null,
+          summary: summary ? summary.content : null,
+          summaryTimestamp: summary ? summary.created_at : null
+        });
+        
+        sessionData.totalTranscripts += transcripts.length;
+        sessionData.totalStudents += 1; // Each group represents student participation
+      }
+      
+      // Add mode-specific data
+      if (session.mode === 'mindmap') {
+        const mindmapSession = await db.collection("mindmap_sessions")
+          .findOne({ session_id: session._id });
+        const mindmapArchive = await db.collection("mindmap_archives")
+          .findOne({ session_id: session._id });
+        
+        sessionData.modeSpecificData = {
+          mainTopic: mindmapSession?.main_topic || session.main_topic,
+          nodeCount: mindmapArchive?.node_count || 0,
+          chatHistory: mindmapSession?.chat_history || [],
+          mindmapData: mindmapArchive?.mindmap_data || mindmapSession?.current_mindmap
+        };
+      } else if (session.mode === 'checkbox') {
+        const checkboxSession = await db.collection("checkbox_sessions")
+          .findOne({ session_id: session._id });
+        const criteria = await db.collection("checkbox_criteria")
+          .find({ session_id: session._id })
+          .sort({ order_index: 1, created_at: 1 })
+          .toArray();
+        const progress = await db.collection("checkbox_progress")
+          .find({ session_id: session._id })
+          .toArray();
+        
+        const completedCount = progress.filter(p => p.completed).length;
+        const totalCriteria = criteria.length;
+        
+        sessionData.modeSpecificData = {
+          scenario: checkboxSession?.scenario || "",
+          totalCriteria: totalCriteria,
+          completedCriteria: completedCount,
+          completionRate: totalCriteria > 0 ? Math.round((completedCount / totalCriteria) * 100) : 0,
+          criteria: criteria.map(c => {
+            const prog = progress.find(p => p.criteria_id === c._id);
+            return {
+              description: c.description,
+              completed: prog?.completed || false,
+              quote: prog?.quote || null,
+              completedAt: prog?.completed_at || null
+            };
+          })
+        };
+      }
+      
+      enrichedSessions.push(sessionData);
+    }
+    
+    // Get total count for pagination
+    const totalCount = await db.collection("sessions").countDocuments(query);
+    
+    res.json({
+      success: true,
+      sessions: enrichedSessions,
+      pagination: {
+        total: totalCount,
+        limit: parseInt(limit),
+        offset: parseInt(offset),
+        hasMore: parseInt(offset) + parseInt(limit) < totalCount
+      },
+      summary: {
+        totalSessions: totalCount,
+        modesAvailable: ['summary', 'mindmap', 'checkbox']
+      }
+    });
+    
+  } catch (err) {
+    console.error("❌ Failed to fetch comprehensive session data:", err);
+    res.status(500).json({ error: "Failed to fetch session data" });
+  }
+});
+
+/* Get detailed data for a specific session */
+app.get("/api/data/session/:sessionCode", async (req, res) => {
+  try {
+    const { sessionCode } = req.params;
+    
+    console.log(`📊 Fetching detailed data for session: ${sessionCode}`);
+    
+    // Get session
+    const session = await db.collection("sessions").findOne({ code: sessionCode });
+    if (!session) {
+      return res.status(404).json({ error: "Session not found" });
+    }
+    
+    // Get groups with full transcript data
+    const groups = await db.collection("groups")
+      .find({ session_id: session._id })
+      .sort({ number: 1 })
+      .toArray();
+    
+    const detailedGroups = [];
+    for (const group of groups) {
+      const transcripts = await db.collection("transcripts")
+        .find({ group_id: group._id })
+        .sort({ created_at: 1 })
+        .toArray();
+      
+      const summary = await db.collection("summaries")
+        .findOne({ group_id: group._id });
+      
+      detailedGroups.push({
+        ...group,
+        transcripts: transcripts,
+        summary: summary
+      });
+    }
+    
+    // Get mode-specific detailed data
+    let modeSpecificData = null;
+    if (session.mode === 'mindmap') {
+      const mindmapSession = await db.collection("mindmap_sessions")
+        .findOne({ session_id: session._id });
+      const mindmapArchive = await db.collection("mindmap_archives")
+        .findOne({ session_id: session._id });
+      const logs = await db.collection("session_logs")
+        .find({ session_id: session._id })
+        .sort({ created_at: 1 })
+        .toArray();
+      
+      modeSpecificData = {
+        mindmapSession,
+        mindmapArchive,
+        processingLogs: logs
+      };
+    } else if (session.mode === 'checkbox') {
+      const checkboxSession = await db.collection("checkbox_sessions")
+        .findOne({ session_id: session._id });
+      const criteria = await db.collection("checkbox_criteria")
+        .find({ session_id: session._id })
+        .sort({ order_index: 1, created_at: 1 })
+        .toArray();
+      const progress = await db.collection("checkbox_progress")
+        .find({ session_id: session._id })
+        .toArray();
+      const logs = await db.collection("session_logs")
+        .find({ session_id: session._id })
+        .sort({ created_at: 1 })
+        .toArray();
+      
+      modeSpecificData = {
+        checkboxSession,
+        criteria,
+        progress,
+        processingLogs: logs
+      };
+    }
+    
+    res.json({
+      success: true,
+      session: session,
+      groups: detailedGroups,
+      modeSpecificData: modeSpecificData,
+      stats: {
+        totalGroups: detailedGroups.length,
+        totalTranscripts: detailedGroups.reduce((sum, g) => sum + g.transcripts.length, 0),
+        duration: session.end_time ? session.end_time - session.start_time : null,
+        durationFormatted: session.end_time ? 
+          formatDuration(session.end_time - session.start_time) : "In progress"
+      }
+    });
+    
+  } catch (err) {
+    console.error(`❌ Failed to fetch detailed session data for ${req.params.sessionCode}:`, err);
+    res.status(500).json({ error: "Failed to fetch session details" });
+  }
+});
+
+/* Helper function to format duration */
+function formatDuration(ms) {
+  const seconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(seconds / 60);
+  const hours = Math.floor(minutes / 60);
+  
+  if (hours > 0) {
+    return `${hours}h ${minutes % 60}m ${seconds % 60}s`;
+  } else if (minutes > 0) {
+    return `${minutes}m ${seconds % 60}s`;
+  } else {
+    return `${seconds}s`;
+  }
+}
+
+// ... existing code ...
+
+/* ---------- Teacher Prompt Management API ---------- */
+
+/* Get all prompts with filtering and search */
+app.get("/api/prompts", async (req, res) => {
+  try {
+    const { 
+      search = "", 
+      category = "", 
+      mode = "", 
+      limit = 50, 
+      offset = 0,
+      sortBy = "created_at",
+      sortOrder = "desc"
+    } = req.query;
+    
+    console.log(`📝 Fetching prompts (search: "${search}", category: "${category}", mode: "${mode}")`);
+    
+    // Build query filter
+    const query = {};
+    
+    if (search.trim()) {
+      query.$or = [
+        { title: { $regex: search, $options: 'i' } },
+        { description: { $regex: search, $options: 'i' } },
+        { content: { $regex: search, $options: 'i' } },
+        { tags: { $in: [new RegExp(search, 'i')] } }
+      ];
+    }
+    
+    if (category) query.category = category;
+    if (mode) query.mode = mode;
+    
+    // Build sort option
+    const sortOption = {};
+    sortOption[sortBy] = sortOrder === 'desc' ? -1 : 1;
+    
+    // Get prompts with pagination
+    const prompts = await db.collection("teacher_prompts")
+      .find(query)
+      .sort(sortOption)
+      .skip(parseInt(offset))
+      .limit(parseInt(limit))
+      .toArray();
+    
+    // Get total count for pagination
+    const totalCount = await db.collection("teacher_prompts").countDocuments(query);
+    
+    // Get categories and modes for filtering
+    const categories = await db.collection("teacher_prompts").distinct("category");
+    const modes = await db.collection("teacher_prompts").distinct("mode");
+    
+    res.json({
+      success: true,
+      prompts: prompts,
+      pagination: {
+        total: totalCount,
+        limit: parseInt(limit),
+        offset: parseInt(offset),
+        hasMore: parseInt(offset) + parseInt(limit) < totalCount
+      },
+      filters: {
+        categories: categories.sort(),
+        modes: modes.sort()
+      }
+    });
+    
+  } catch (err) {
+    console.error("❌ Failed to fetch prompts:", err);
+    res.status(500).json({ error: "Failed to fetch prompts" });
+  }
+});
+
+/* Get a specific prompt by ID */
+app.get("/api/prompts/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    console.log(`📝 Fetching prompt: ${id}`);
+    
+    const prompt = await db.collection("teacher_prompts").findOne({ _id: id });
+    if (!prompt) {
+      return res.status(404).json({ error: "Prompt not found" });
+    }
+    
+    // Increment view count
+    await db.collection("teacher_prompts").updateOne(
+      { _id: id },
+      { 
+        $inc: { views: 1 },
+        $set: { last_viewed: Date.now() }
+      }
+    );
+    
+    res.json({
+      success: true,
+      prompt: prompt
+    });
+    
+  } catch (err) {
+    console.error(`❌ Failed to fetch prompt ${req.params.id}:`, err);
+    res.status(500).json({ error: "Failed to fetch prompt" });
+  }
+});
+
+/* Create a new prompt */
+app.post("/api/prompts", express.json(), async (req, res) => {
+  try {
+    const { 
+      title, 
+      description, 
+      content, 
+      category, 
+      mode, 
+      tags = [], 
+      isPublic = true,
+      authorName = "Anonymous Teacher"
+    } = req.body;
+    
+    if (!title || !content) {
+      return res.status(400).json({ error: "Title and content are required" });
+    }
+    
+    console.log(`📝 Creating new prompt: "${title}"`);
+    
+    const promptId = uuid();
+    const now = Date.now();
+    
+    const newPrompt = {
+      _id: promptId,
+      title: title.trim(),
+      description: description ? description.trim() : "",
+      content: content.trim(),
+      category: category || "General",
+      mode: mode || "summary",
+      tags: Array.isArray(tags) ? tags.map(tag => tag.trim()).filter(tag => tag.length > 0) : [],
+      isPublic: Boolean(isPublic),
+      authorName: authorName.trim(),
+      created_at: now,
+      updated_at: now,
+      views: 0,
+      last_viewed: null,
+      usage_count: 0,
+      last_used: null
+    };
+    
+    await db.collection("teacher_prompts").insertOne(newPrompt);
+    
+    res.json({
+      success: true,
+      prompt: newPrompt,
+      message: "Prompt created successfully"
+    });
+    
+  } catch (err) {
+    console.error("❌ Failed to create prompt:", err);
+    res.status(500).json({ error: "Failed to create prompt" });
+  }
+});
+
+/* Update an existing prompt */
+app.put("/api/prompts/:id", express.json(), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { 
+      title, 
+      description, 
+      content, 
+      category, 
+      mode, 
+      tags = [], 
+      isPublic,
+      authorName
+    } = req.body;
+    
+    if (!title || !content) {
+      return res.status(400).json({ error: "Title and content are required" });
+    }
+    
+    console.log(`📝 Updating prompt: ${id}`);
+    
+    const updateData = {
+      title: title.trim(),
+      description: description ? description.trim() : "",
+      content: content.trim(),
+      category: category || "General",
+      mode: mode || "summary",
+      tags: Array.isArray(tags) ? tags.map(tag => tag.trim()).filter(tag => tag.length > 0) : [],
+      updated_at: Date.now()
+    };
+    
+    if (typeof isPublic === 'boolean') updateData.isPublic = isPublic;
+    if (authorName) updateData.authorName = authorName.trim();
+    
+    const result = await db.collection("teacher_prompts").updateOne(
+      { _id: id },
+      { $set: updateData }
+    );
+    
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ error: "Prompt not found" });
+    }
+    
+    const updatedPrompt = await db.collection("teacher_prompts").findOne({ _id: id });
+    
+    res.json({
+      success: true,
+      prompt: updatedPrompt,
+      message: "Prompt updated successfully"
+    });
+    
+  } catch (err) {
+    console.error(`❌ Failed to update prompt ${req.params.id}:`, err);
+    res.status(500).json({ error: "Failed to update prompt" });
+  }
+});
+
+/* Delete a prompt */
+app.delete("/api/prompts/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    console.log(`📝 Deleting prompt: ${id}`);
+    
+    const result = await db.collection("teacher_prompts").deleteOne({ _id: id });
+    
+    if (result.deletedCount === 0) {
+      return res.status(404).json({ error: "Prompt not found" });
+    }
+    
+    res.json({
+      success: true,
+      message: "Prompt deleted successfully"
+    });
+    
+  } catch (err) {
+    console.error(`❌ Failed to delete prompt ${req.params.id}:`, err);
+    res.status(500).json({ error: "Failed to delete prompt" });
+  }
+});
+
+/* Use/apply a prompt (increments usage counter) */
+app.post("/api/prompts/:id/use", express.json(), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { sessionCode } = req.body;
+    
+    console.log(`📝 Using prompt ${id} for session ${sessionCode}`);
+    
+    const prompt = await db.collection("teacher_prompts").findOne({ _id: id });
+    if (!prompt) {
+      return res.status(404).json({ error: "Prompt not found" });
+    }
+    
+    // Increment usage counter
+    await db.collection("teacher_prompts").updateOne(
+      { _id: id },
+      { 
+        $inc: { usage_count: 1 },
+        $set: { last_used: Date.now() }
+      }
+    );
+    
+    res.json({
+      success: true,
+      prompt: prompt,
+      message: "Prompt applied successfully"
+    });
+    
+  } catch (err) {
+    console.error(`❌ Failed to use prompt ${req.params.id}:`, err);
+    res.status(500).json({ error: "Failed to use prompt" });
+  }
+});
+
+/* Get prompt statistics */
+app.get("/api/prompts/stats/overview", async (req, res) => {
+  try {
+    console.log("📊 Fetching prompt statistics");
+    
+    const totalPrompts = await db.collection("teacher_prompts").countDocuments();
+    const publicPrompts = await db.collection("teacher_prompts").countDocuments({ isPublic: true });
+    const privatePrompts = totalPrompts - publicPrompts;
+    
+    // Most popular prompts
+    const popularPrompts = await db.collection("teacher_prompts")
+      .find({ isPublic: true })
+      .sort({ usage_count: -1, views: -1 })
+      .limit(5)
+      .toArray();
+    
+    // Recent prompts
+    const recentPrompts = await db.collection("teacher_prompts")
+      .find({ isPublic: true })
+      .sort({ created_at: -1 })
+      .limit(5)
+      .toArray();
+    
+    // Category distribution
+    const categoryStats = await db.collection("teacher_prompts").aggregate([
+      { $group: { _id: "$category", count: { $sum: 1 } } },
+      { $sort: { count: -1 } }
+    ]).toArray();
+    
+    // Mode distribution
+    const modeStats = await db.collection("teacher_prompts").aggregate([
+      { _id: "$mode", count: { $sum: 1 } },
+      { $sort: { count: -1 } }
+    ]).toArray();
+    
+    res.json({
+      success: true,
+      stats: {
+        totalPrompts,
+        publicPrompts,
+        privatePrompts,
+        popularPrompts,
+        recentPrompts,
+        categoryDistribution: categoryStats,
+        modeDistribution: modeStats
+      }
+    });
+    
+  } catch (err) {
+    console.error("❌ Failed to fetch prompt statistics:", err);
+    res.status(500).json({ error: "Failed to fetch statistics" });
+  }
+});
+
+/* Duplicate/clone a prompt */
+app.post("/api/prompts/:id/clone", express.json(), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { authorName = "Anonymous Teacher" } = req.body;
+    
+    console.log(`📝 Cloning prompt: ${id}`);
+    
+    const originalPrompt = await db.collection("teacher_prompts").findOne({ _id: id });
+    if (!originalPrompt) {
+      return res.status(404).json({ error: "Prompt not found" });
+    }
+    
+    const clonedPromptId = uuid();
+    const now = Date.now();
+    
+    const clonedPrompt = {
+      ...originalPrompt,
+      _id: clonedPromptId,
+      title: `${originalPrompt.title} (Copy)`,
+      authorName: authorName.trim(),
+      created_at: now,
+      updated_at: now,
+      views: 0,
+      last_viewed: null,
+      usage_count: 0,
+      last_used: null,
+      isPublic: false // Clones start as private
+    };
+    
+    await db.collection("teacher_prompts").insertOne(clonedPrompt);
+    
+    res.json({
+      success: true,
+      prompt: clonedPrompt,
+      message: "Prompt cloned successfully"
+    });
+    
+  } catch (err) {
+    console.error(`❌ Failed to clone prompt ${req.params.id}:`, err);
+    res.status(500).json({ error: "Failed to clone prompt" });
+  }
+});
+
+// ... existing code ...
+
+/* Seed default prompts for teachers */
+async function seedDefaultPrompts() {
+  try {
+    console.log('🌱 Checking for default prompts...');
+    
+    const existingPrompts = await db.collection("teacher_prompts").countDocuments();
+    if (existingPrompts > 0) {
+      console.log('🌱 Default prompts already exist, skipping seed');
+      return;
+    }
+    
+    console.log('🌱 Seeding default teacher prompts...');
+    
+    const defaultPrompts = [
+      {
+        _id: uuid(),
+        title: "Science Discussion Summary",
+        description: "Summarizes science classroom discussions with focus on key concepts, student understanding, and misconceptions",
+        content: `Please analyze this classroom discussion transcript and create a comprehensive summary focusing on:
+
+1. **Key Scientific Concepts Discussed**: What main scientific ideas, theories, or principles were covered?
+
+2. **Student Understanding**: What evidence shows students are grasping the concepts? Quote specific student responses.
+
+3. **Misconceptions Identified**: What incorrect ideas or misunderstandings did students express? How were they addressed?
+
+4. **Questions & Inquiry**: What questions did students ask? What sparked their curiosity?
+
+5. **Practical Applications**: Did students connect the science to real-world examples or applications?
+
+6. **Next Steps**: Based on this discussion, what topics might need more explanation or what should be covered next?
+
+Format your response clearly with these sections. Include specific quotes from students to support your analysis.
+
+Transcript: {transcript}`,
+        category: "Science",
+        mode: "summary",
+        tags: ["science", "discussion", "analysis", "misconceptions"],
+        isPublic: true,
+        authorName: "Smart Classroom Team",
+        created_at: Date.now(),
+        updated_at: Date.now(),
+        views: 0,
+        last_viewed: null,
+        usage_count: 0,
+        last_used: null
+      },
+      {
+        _id: uuid(),
+        title: "Mathematics Problem-Solving Analysis",
+        description: "Analyzes math discussions focusing on problem-solving strategies, reasoning, and mathematical communication",
+        content: `Analyze this mathematics classroom discussion and provide insights on:
+
+1. **Problem-Solving Strategies**: What approaches did students use? Were they effective?
+
+2. **Mathematical Reasoning**: How did students explain their thinking? What reasoning patterns emerged?
+
+3. **Collaboration & Communication**: How well did students explain their ideas to peers? What mathematical vocabulary was used?
+
+4. **Errors & Learning**: What mistakes were made and how were they corrected? What learning opportunities arose from errors?
+
+5. **Conceptual Understanding**: Do students understand the underlying mathematical concepts or just procedures?
+
+6. **Differentiation Needs**: Which students may need additional support or challenge?
+
+Include specific examples from the transcript to illustrate your points.
+
+Transcript: {transcript}`,
+        category: "Mathematics",
+        mode: "summary",
+        tags: ["mathematics", "problem-solving", "reasoning", "communication"],
+        isPublic: true,
+        authorName: "Smart Classroom Team",
+        created_at: Date.now(),
+        updated_at: Date.now(),
+        views: 0,
+        last_viewed: null,
+        usage_count: 0,
+        last_used: null
+      },
+      {
+        _id: uuid(),
+        title: "Literature Discussion Mindmap",
+        description: "Creates a mindmap of literature discussions showing themes, character analysis, and literary devices",
+        content: `Create a structured mindmap from this literature discussion focusing on:
+
+Main Topic: {topic}
+
+Organize the discussion into these main branches:
+- Character Analysis (motivations, development, relationships)
+- Themes & Messages (central ideas, author's purpose)
+- Literary Devices (symbolism, metaphors, imagery, etc.)
+- Plot & Structure (events, conflicts, resolution)
+- Student Interpretations (different viewpoints, personal connections)
+- Questions & Wonderings (unresolved questions, areas for further discussion)
+
+For each branch, identify 2-4 specific points from the discussion. Include brief quotes or paraphrases from students when relevant.
+
+Create clear, concise nodes that capture the essence of student thinking and literary analysis.
+
+Transcript: {transcript}`,
+        category: "Language Arts",
+        mode: "mindmap",
+        tags: ["literature", "analysis", "themes", "characters"],
+        isPublic: true,
+        authorName: "Smart Classroom Team",
+        created_at: Date.now(),
+        updated_at: Date.now(),
+        views: 0,
+        last_viewed: null,
+        usage_count: 0,
+        last_used: null
+      },
+      {
+        _id: uuid(),
+        title: "Social Studies Debate Assessment",
+        description: "Evaluates student participation in social studies debates using specific criteria",
+        content: `Evaluate this social studies discussion/debate based on the following criteria. Mark each as completed when there is clear evidence in the transcript:
+
+Students demonstrate understanding of historical context
+Students use evidence from primary or secondary sources
+Students present multiple perspectives on the issue
+Students make connections to current events or modern parallels
+Students use appropriate historical vocabulary
+Students listen respectfully to opposing viewpoints
+Students ask thoughtful follow-up questions
+Students support their arguments with specific examples
+Students acknowledge counterarguments
+Students demonstrate critical thinking about sources and bias
+
+For each completed criteria, provide a specific quote from the transcript that demonstrates the skill.
+
+Focus on identifying clear evidence of these historical thinking skills in student responses.`,
+        category: "Social Studies",
+        mode: "checkbox",
+        tags: ["debate", "historical thinking", "evidence", "perspectives"],
+        isPublic: true,
+        authorName: "Smart Classroom Team",
+        created_at: Date.now(),
+        updated_at: Date.now(),
+        views: 0,
+        last_viewed: null,
+        usage_count: 0,
+        last_used: null
+      },
+      {
+        _id: uuid(),
+        title: "General Discussion Facilitation",
+        description: "Analyzes any classroom discussion for participation patterns, engagement, and facilitation opportunities",
+        content: `Analyze this classroom discussion for facilitation insights:
+
+**Participation Analysis:**
+- Who contributed most/least to the discussion?
+- What types of contributions were made (questions, answers, building on ideas, etc.)?
+- Were there opportunities for more students to participate?
+
+**Discussion Quality:**
+- What evidence shows deep thinking vs. surface-level responses?
+- How well did students build on each other's ideas?
+- What questions or comments moved the discussion forward?
+
+**Teacher Facilitation:**
+- What teacher moves were effective in promoting discussion?
+- Where could different questioning or facilitation strategies have been helpful?
+- What opportunities for student-led discussion emerged?
+
+**Engagement Indicators:**
+- What showed students were actively listening and engaged?
+- Were there moments of excitement, confusion, or breakthrough understanding?
+
+**Next Steps:**
+- What follow-up questions or activities would extend this discussion?
+- Which students might benefit from individual check-ins?
+
+Transcript: {transcript}`,
+        category: "General",
+        mode: "summary",
+        tags: ["facilitation", "participation", "engagement", "discussion"],
+        isPublic: true,
+        authorName: "Smart Classroom Team",
+        created_at: Date.now(),
+        updated_at: Date.now(),
+        views: 0,
+        last_viewed: null,
+        usage_count: 0,
+        last_used: null
+      },
+      {
+        _id: uuid(),
+        title: "Project-Based Learning Assessment",
+        description: "Evaluates collaborative project discussions for 21st-century skills and learning outcomes",
+        content: `Assess this project-based learning discussion using these criteria. Mark completed when evidence is present:
+
+Students identify and define the problem clearly
+Students brainstorm multiple solution approaches
+Students assign roles and responsibilities effectively
+Students demonstrate research and information literacy skills
+Students show creativity and innovation in their ideas
+Students communicate ideas clearly to team members
+Students listen actively and build on others' contributions
+Students show persistence when facing challenges
+Students reflect on their learning process
+Students make connections to real-world applications
+Students demonstrate digital literacy or technology integration
+Students show cultural awareness or global perspective
+Students exhibit leadership skills
+Students practice time management and organization
+Students engage in constructive peer feedback
+
+Provide specific quotes that demonstrate each completed criterion.`,
+        category: "Assessment",
+        mode: "checkbox",
+        tags: ["project-based", "collaboration", "21st-century-skills", "assessment"],
+        isPublic: true,
+        authorName: "Smart Classroom Team",
+        created_at: Date.now(),
+        updated_at: Date.now(),
+        views: 0,
+        last_viewed: null,
+        usage_count: 0,
+        last_used: null
+      }
+    ];
+    
+    await db.collection("teacher_prompts").insertMany(defaultPrompts);
+    console.log(`🌱 Successfully seeded ${defaultPrompts.length} default prompts`);
+    
+  } catch (err) {
+    console.error('❌ Failed to seed default prompts:', err);
+  }
+}
+
+// ... existing code ...
+
+// Clean up old session data to prevent contamination
+async function cleanupOldSessionData(sessionCode) {
+  try {
+    console.log(`🧹 Cleaning up old data for session: ${sessionCode}`);
+    
+    // Get the session document
+    const session = await db.collection("sessions").findOne({ code: sessionCode });
+    if (!session) {
+      console.log(`📋 No session found with code: ${sessionCode}`);
+      return;
+    }
+    
+    // Delete old checkbox progress
+    const progressResult = await db.collection("checkbox_progress").deleteMany({ session_id: session._id });
+    console.log(`🗑️ Deleted ${progressResult.deletedCount} old progress records`);
+    
+    // Delete old checkbox criteria
+    const criteriaResult = await db.collection("checkbox_criteria").deleteMany({ session_id: session._id });
+    console.log(`🗑️ Deleted ${criteriaResult.deletedCount} old criteria records`);
+    
+    // Delete old checkbox session
+    const sessionResult = await db.collection("checkbox_sessions").deleteMany({ session_id: session._id });
+    console.log(`🗑️ Deleted ${sessionResult.deletedCount} old checkbox session records`);
+    
+    console.log(`✅ Session ${sessionCode} cleaned up successfully`);
+  } catch (err) {
+    console.error(`❌ Error cleaning up session ${sessionCode}:`, err);
+  }
+}

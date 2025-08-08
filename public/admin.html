@@ -100,6 +100,95 @@
                 font-size: 16px;
             }
         }
+        
+        /* Responsive navigation fixes */
+        .mode-navigation {
+            overflow-x: auto;
+            scrollbar-width: none;
+            -ms-overflow-style: none;
+        }
+        .mode-navigation::-webkit-scrollbar {
+            display: none;
+        }
+        
+        .mode-btn {
+            white-space: nowrap;
+            flex-shrink: 0;
+            min-width: fit-content;
+        }
+        
+        /* Ensure header doesn't overflow */
+        .header-content {
+            min-width: 0;
+            overflow: hidden;
+        }
+        
+        /* Better responsive navigation */
+        @media (max-width: 768px) {
+            .mode-navigation {
+                min-width: 0;
+                flex: 1;
+            }
+            
+            .mode-btn {
+                padding: 0.5rem 0.75rem;
+                font-size: 0.75rem;
+                min-width: auto;
+                flex: 1;
+            }
+            
+            .mode-btn span {
+                display: none;
+            }
+            
+            .mode-btn i {
+                margin-right: 0;
+                width: 1rem;
+                height: 1rem;
+            }
+            
+            /* Make header more compact on mobile */
+            .header-title {
+                font-size: 1.25rem;
+            }
+            
+            .header-subtitle {
+                font-size: 0.75rem;
+            }
+        }
+        
+        @media (max-width: 640px) {
+            .header-nav-container {
+                flex-direction: column;
+                gap: 0.75rem;
+                align-items: stretch;
+            }
+            
+            .mode-navigation {
+                width: 100%;
+                justify-content: space-between;
+            }
+            
+            .mode-btn {
+                flex: 1;
+                justify-content: center;
+                padding: 0.75rem 0.5rem;
+            }
+        }
+        
+        /* Prevent text overflow in titles */
+        .truncate-text {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            max-width: 200px;
+        }
+        
+        @media (max-width: 480px) {
+            .truncate-text {
+                max-width: 120px;
+            }
+        }
   </style>
 </head>
 <body class="bg-gray-50 min-h-screen">
@@ -210,6 +299,14 @@
                             <i data-lucide="check-square" class="w-4 h-4 mr-1 sm:mr-2 flex-shrink-0"></i>
                             <span class="truncate">Checkbox</span>
                         </a>
+                        <a href="/data.html" class="mode-btn text-white/80 hover:bg-white/20 hover:text-white px-3 py-2 rounded text-sm font-medium transition-colors flex items-center justify-center flex-1 sm:flex-initial min-w-0">
+                            <i data-lucide="database" class="w-4 h-4 mr-1 sm:mr-2 flex-shrink-0"></i>
+                            <span class="truncate">Data</span>
+                        </a>
+                        <a href="/prompts.html" class="mode-btn text-white/80 hover:bg-white/20 hover:text-white px-3 py-2 rounded text-sm font-medium transition-colors flex items-center justify-center flex-1 sm:flex-initial min-w-0">
+                            <i data-lucide="file-text" class="w-4 h-4 mr-1 sm:mr-2 flex-shrink-0"></i>
+                            <span class="truncate">Prompts</span>
+                        </a>
                     </div>
                 </div>
             </div>
@@ -218,7 +315,7 @@
 
     <!-- Main Content -->
     <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <!-- Prompt Editor Section (Collapsible) -->
+        <!-- Prompt Management Section (Collapsible) -->
         <div class="bg-white rounded-xl shadow-lg border border-gray-200 mb-8">
             <button 
                 id="promptToggle" 
@@ -228,13 +325,11 @@
                 <div class="flex items-center justify-between">
                     <div class="flex items-center space-x-3">
                         <div class="w-8 h-8 bg-purple-100 rounded-lg flex items-center justify-center">
-                            <svg class="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
-                            </svg>
+                            <i data-lucide="file-text" class="w-5 h-5 text-purple-600"></i>
                         </div>
                         <div>
-                            <h3 class="text-lg font-semibold text-gray-900">AI Summarization Prompt</h3>
-                            <p class="text-sm text-gray-600">Customize how the AI summarizes your classroom discussions</p>
+                            <h3 class="text-lg font-semibold text-gray-900">AI Summarization Prompts</h3>
+                            <p class="text-sm text-gray-600">Manage and customize AI prompts for classroom discussions</p>
                         </div>
                     </div>
                     <svg id="promptChevron" class="w-5 h-5 text-gray-400 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -245,66 +340,204 @@
             
             <div id="promptEditor" class="hidden border-t border-gray-200">
                 <div class="p-6">
-                    <div class="space-y-4">
-                        <div>
-                            <label for="promptText" class="block text-sm font-medium text-gray-700 mb-2">
-                                Summarization Prompt
-                            </label>
-                            <textarea 
-                                id="promptText" 
-                                rows="4" 
-                                class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-vertical"
-                                placeholder="Enter your custom prompt for AI summarization..."
-                            >Summarise the following classroom discussion in ≤6 clear bullet points:</textarea>
+                    <!-- Prompt Library Section -->
+                    <div class="mb-6">
+                        <div class="flex items-center justify-between mb-4">
+                            <h4 class="text-sm font-semibold text-gray-700">Prompt Library</h4>
+                            <div class="flex gap-2">
+                                <button onclick="refreshPromptLibrary()" class="text-xs text-gray-500 hover:text-gray-700 flex items-center">
+                                    <i data-lucide="refresh-cw" class="w-3 h-3 mr-1"></i>
+                                    Refresh
+                                </button>
+                                <button onclick="openCreatePromptModal()" class="text-xs bg-blue-600 text-white px-2 py-1 rounded hover:bg-blue-700 flex items-center">
+                                    <i data-lucide="plus" class="w-3 h-3 mr-1"></i>
+                                    New
+                                </button>
+                            </div>
                         </div>
                         
-                        <div class="flex items-center justify-between">
-                            <div class="flex items-center space-x-4">
-                                <button 
-                                    onclick="resetToDefaultPrompt()"
-                                    class="text-gray-600 hover:text-gray-800 text-sm font-medium transition-colors"
+                        <!-- Search and Filter -->
+                        <div class="flex gap-2 mb-3">
+                            <div class="flex-1 relative">
+                                <i data-lucide="search" class="absolute left-3 top-1/2 transform -translate-y-1/2 w-3 h-3 text-gray-400"></i>
+                                <input 
+                                    id="promptSearch" 
+                                    type="text" 
+                                    placeholder="Search prompts..." 
+                                    class="w-full pl-8 pr-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    onkeyup="filterPrompts()"
                                 >
-                                    🔄 Reset to Default
-                                </button>
-                                <div class="text-xs text-gray-500">
-                                    Tip: Use clear, specific instructions for best results
+                            </div>
+                            <select id="promptCategoryFilter" class="px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent" onchange="filterPrompts()">
+                                <option value="">All Categories</option>
+                            </select>
+                        </div>
+                        
+                        <!-- Prompt Cards Grid -->
+                        <div id="promptLibraryGrid" class="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-64 overflow-y-auto">
+                            <div class="flex items-center justify-center py-8 text-gray-500 text-sm col-span-full">
+                                <i data-lucide="loader" class="w-4 h-4 mr-2 animate-spin"></i>
+                                Loading prompts...
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Current Prompt Editor -->
+                    <div class="border-t border-gray-200 pt-6">
+                        <div class="space-y-4">
+                            <div>
+                                <div class="flex items-center justify-between mb-2">
+                                    <label for="promptText" class="block text-sm font-medium text-gray-700">
+                                        Current Summarization Prompt
+                                    </label>
+                                    <div class="flex gap-2">
+                                        <button onclick="saveCurrentPrompt()" class="text-xs bg-green-600 text-white px-2 py-1 rounded hover:bg-green-700">
+                                            Save as New
+                                        </button>
+                                        <button onclick="resetToDefaultPrompt()" class="text-xs text-gray-500 hover:text-gray-700">
+                                            Reset Default
+                                        </button>
+                                    </div>
+                                </div>
+                                <textarea 
+                                    id="promptText" 
+                                    rows="4" 
+                                    class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-vertical text-sm font-mono"
+                                    placeholder="Enter your custom prompt for AI summarization..."
+                                >Summarise the following classroom discussion in ≤6 clear bullet points:</textarea>
+                                <div class="flex items-center justify-between mt-2">
+                                    <p class="text-xs text-gray-500">
+                                        💡 Tip: Use clear, specific instructions for best results
+                                    </p>
+                                    <div class="flex gap-2">
+                                        <button onclick="testPrompt()" class="text-xs bg-gray-600 text-white px-3 py-1 rounded hover:bg-gray-700">
+                                            🧪 Test
+                                        </button>
+                                        <button onclick="savePrompt()" class="text-xs bg-purple-600 text-white px-3 py-1 rounded hover:bg-purple-700">
+                                            💾 Apply
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
-                            <div class="flex space-x-3">
-                                <button
-                                    onclick="testPrompt()"
-                                    class="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-lg font-medium transition-colors"
-                                >
-                                    🧪 Test Prompt
-                                </button>
-                                <button
-                                    onclick="savePrompt()"
-                                    class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg font-medium transition-colors"
-                                >
-                                    💾 Save Prompt
-                                </button>
-                                <button
-                                    onclick="addPromptToLibrary()"
-                                    class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg font-medium transition-colors"
-                                >
-                                    📚 Add to Library
-                                </button>
-                            </div>
                         </div>
-
-                        <div id="promptFeedback" class="hidden p-4 rounded-lg">
+                        
+                        <div id="promptFeedback" class="hidden mt-4 p-4 rounded-lg">
                             <!-- Feedback messages will appear here -->
-                        </div>
-                        <div class="mt-6">
-                            <h4 class="text-sm font-medium text-gray-700 mb-2">Saved Prompts</h4>
-                            <div class="flex mb-3 space-x-2">
-                                <input id="newPromptName" type="text" placeholder="Prompt name" class="flex-grow border px-3 py-2 rounded-lg">
-                                <button onclick="addPromptToLibrary()" class="bg-green-600 hover:bg-green-700 text-white px-3 py-2 rounded-lg">Add</button>
-                            </div>
-                            <ul id="promptList" class="space-y-2"></ul>
                         </div>
                     </div>
                 </div>
+            </div>
+        </div>
+
+        <!-- Create/Edit Prompt Modal -->
+        <div id="createPromptModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 hidden z-50">
+            <div class="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden">
+                <div class="flex items-center justify-between p-6 border-b border-gray-200">
+                    <div>
+                        <h3 id="createPromptModalTitle" class="text-lg font-semibold text-gray-900">Create New Prompt</h3>
+                        <p class="text-sm text-gray-600">Add a new summarization prompt to your library</p>
+                    </div>
+                    <button onclick="closeCreatePromptModal()" class="text-gray-400 hover:text-gray-600 transition-colors">
+                        <i data-lucide="x" class="w-6 h-6"></i>
+                    </button>
+                </div>
+                <form id="createPromptForm" class="p-6 overflow-y-auto max-h-[75vh]">
+                    <input type="hidden" id="editPromptId" value="">
+                    
+                    <div class="grid grid-cols-2 gap-4 mb-4">
+                        <div>
+                            <label for="newPromptTitle" class="block text-sm font-medium text-gray-700 mb-2">Title *</label>
+                            <input 
+                                type="text" 
+                                id="newPromptTitle" 
+                                required
+                                class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                                placeholder="Enter prompt title..."
+                            >
+                        </div>
+                        <div>
+                            <label for="newPromptAuthor" class="block text-sm font-medium text-gray-700 mb-2">Author</label>
+                            <input 
+                                type="text" 
+                                id="newPromptAuthor" 
+                                class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                                placeholder="Your name (optional)"
+                            >
+                        </div>
+                    </div>
+
+                    <div class="mb-4">
+                        <label for="newPromptDescription" class="block text-sm font-medium text-gray-700 mb-2">Description</label>
+                        <textarea 
+                            id="newPromptDescription" 
+                            rows="2"
+                            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-vertical text-sm"
+                            placeholder="Describe what this prompt does..."
+                        ></textarea>
+                    </div>
+
+                    <div class="grid grid-cols-3 gap-4 mb-4">
+                        <div>
+                            <label for="newPromptCategory" class="block text-sm font-medium text-gray-700 mb-2">Category</label>
+                            <select id="newPromptCategory" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm">
+                                <option value="General">General</option>
+                                <option value="Science">Science</option>
+                                <option value="Mathematics">Mathematics</option>
+                                <option value="Language Arts">Language Arts</option>
+                                <option value="Social Studies">Social Studies</option>
+                                <option value="Assessment">Assessment</option>
+                                <option value="Discussion">Discussion</option>
+                                <option value="Analysis">Analysis</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label for="newPromptVisibility" class="block text-sm font-medium text-gray-700 mb-2">Visibility</label>
+                            <select id="newPromptVisibility" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm">
+                                <option value="true">Public</option>
+                                <option value="false">Private</option>
+                            </select>
+                        </div>
+                        <div class="flex items-end">
+                            <input type="hidden" id="newPromptMode" value="summary">
+                            <div class="w-full px-3 py-2 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-700 font-medium text-center">
+                                Summary Mode
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mb-4">
+                        <label for="newPromptTags" class="block text-sm font-medium text-gray-700 mb-2">Tags</label>
+                        <input 
+                            type="text" 
+                            id="newPromptTags" 
+                            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                            placeholder="Enter tags separated by commas"
+                        >
+                    </div>
+
+                    <div class="mb-6">
+                        <label for="newPromptContent" class="block text-sm font-medium text-gray-700 mb-2">Prompt Content *</label>
+                        <textarea 
+                            id="newPromptContent" 
+                            rows="6"
+                            required
+                            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-vertical font-mono text-sm"
+                            placeholder="Enter your AI prompt here..."
+                        ></textarea>
+                    </div>
+
+                    <div class="flex items-center justify-between pt-4 border-t border-gray-200">
+                        <div class="text-sm text-gray-500">* Required fields</div>
+                        <div class="flex space-x-3">
+                            <button type="button" onclick="closeCreatePromptModal()" class="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors text-sm">
+                                Cancel
+                            </button>
+                            <button type="submit" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors text-sm">
+                                <span id="createPromptSubmitText">Create Prompt</span>
+                            </button>
+                        </div>
+                    </div>
+                </form>
             </div>
         </div>
 
@@ -1154,135 +1387,322 @@
         updateConnectionStatus(false);
     });
     
-    socket.on('reconnect', () => {
-        console.log('🔌 Admin socket reconnected');
-        updateConnectionStatus(true);
-        lastHeartbeatTime = Date.now();
+    // Initialize prompt library on page load
+    document.addEventListener('DOMContentLoaded', () => {
+        loadPromptLibrary();
         
-        // Rejoin current session if we have one
-        if (sessionCode) {
-            socket.emit('admin_join', { code: sessionCode });
-            console.log(`🔄 Rejoining session after reconnect: ${sessionCode}`);
-        }
+        // Add form submission handler for create prompt modal
+        document.getElementById('createPromptForm').addEventListener('submit', handleCreatePromptSubmit);
     });
     
-    // Button handlers
-    document.getElementById('startBtn').addEventListener('click', async () => {
+    // ===================
+    // PROMPT MANAGEMENT
+    // ===================
+    
+    let currentPrompts = [];
+    let availableCategories = [];
+    
+    // Load prompt library from API
+    async function loadPromptLibrary() {
         try {
-            const intervalSeconds = parseInt(document.getElementById('intervalInput').value) || 30;
-            const intervalMs = intervalSeconds * 1000;
+            const response = await fetch('/api/prompts?mode=summary&limit=50');
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
             
-            const response = await fetch(`/api/session/${sessionCode}/start`, {
+            const data = await response.json();
+            currentPrompts = data.prompts;
+            availableCategories = data.filters.categories;
+            
+            updateCategoryFilter();
+            displayPromptLibrary(data.prompts);
+            
+        } catch (err) {
+            console.error('❌ Failed to load prompt library:', err);
+            document.getElementById('promptLibraryGrid').innerHTML = `
+                <div class="flex items-center justify-center py-8 text-red-500 text-sm col-span-full">
+                    <i data-lucide="alert-circle" class="w-4 h-4 mr-2"></i>
+                    Failed to load prompts: ${err.message}
+                </div>
+            `;
+            lucide.createIcons();
+        }
+    }
+    
+    // Refresh prompt library
+    function refreshPromptLibrary() {
+        document.getElementById('promptLibraryGrid').innerHTML = `
+            <div class="flex items-center justify-center py-8 text-gray-500 text-sm col-span-full">
+                <i data-lucide="loader" class="w-4 h-4 mr-2 animate-spin"></i>
+                Refreshing prompts...
+            </div>
+        `;
+        lucide.createIcons();
+        loadPromptLibrary();
+    }
+    
+    // Update category filter options
+    function updateCategoryFilter() {
+        const categoryFilter = document.getElementById('promptCategoryFilter');
+        const currentValue = categoryFilter.value;
+        
+        // Clear existing options (except "All Categories")
+        while (categoryFilter.children.length > 1) {
+            categoryFilter.removeChild(categoryFilter.lastChild);
+        }
+        
+        // Add category options
+        availableCategories.forEach(category => {
+            const option = document.createElement('option');
+            option.value = category;
+            option.textContent = category;
+            categoryFilter.appendChild(option);
+        });
+        
+        // Restore selection
+        categoryFilter.value = currentValue;
+    }
+    
+    // Display prompt library
+    function displayPromptLibrary(prompts) {
+        const grid = document.getElementById('promptLibraryGrid');
+        
+        if (prompts.length === 0) {
+            grid.innerHTML = `
+                <div class="flex items-center justify-center py-8 text-gray-500 text-sm col-span-full">
+                    <i data-lucide="file-text" class="w-4 h-4 mr-2"></i>
+                    No prompts found
+                </div>
+            `;
+            lucide.createIcons();
+            return;
+        }
+        
+        const promptsHtml = prompts.map(prompt => `
+            <div class="bg-gray-50 rounded-lg p-3 hover:bg-gray-100 transition-colors cursor-pointer border border-gray-200" onclick="loadPrompt('${prompt._id}')">
+                <div class="flex items-start justify-between mb-2">
+                    <h5 class="text-sm font-medium text-gray-900 truncate flex-1 mr-2">${prompt.title}</h5>
+                    <div class="flex items-center space-x-1 flex-shrink-0">
+                        ${prompt.isPublic ? '<i data-lucide="globe" class="w-3 h-3 text-green-500" title="Public"></i>' : '<i data-lucide="lock" class="w-3 h-3 text-gray-400" title="Private"></i>'}
+                        <button onclick="event.stopPropagation(); editPrompt('${prompt._id}')" class="text-blue-500 hover:text-blue-700" title="Edit">
+                            <i data-lucide="edit" class="w-3 h-3"></i>
+                        </button>
+                        <button onclick="event.stopPropagation(); deletePrompt('${prompt._id}')" class="text-red-500 hover:text-red-700" title="Delete">
+                            <i data-lucide="trash-2" class="w-3 h-3"></i>
+                        </button>
+                    </div>
+                </div>
+                <p class="text-xs text-gray-600 mb-2 line-clamp-2">${prompt.description || 'No description'}</p>
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center space-x-2">
+                        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-200 text-gray-800">
+                            ${prompt.category}
+                        </span>
+                        ${prompt.tags && prompt.tags.length > 0 ? `<span class="text-xs text-gray-500">+${prompt.tags.length} tags</span>` : ''}
+                    </div>
+                    <div class="text-xs text-gray-500">
+                        ${prompt.usage_count || 0} uses
+                    </div>
+                </div>
+            </div>
+        `).join('');
+        
+        grid.innerHTML = promptsHtml;
+        lucide.createIcons();
+    }
+    
+    // Filter prompts
+    function filterPrompts() {
+        const search = document.getElementById('promptSearch').value.toLowerCase();
+        const category = document.getElementById('promptCategoryFilter').value;
+        
+        let filteredPrompts = currentPrompts.filter(prompt => {
+            const matchesSearch = !search || 
+                prompt.title.toLowerCase().includes(search) ||
+                (prompt.description && prompt.description.toLowerCase().includes(search)) ||
+                prompt.content.toLowerCase().includes(search) ||
+                (prompt.tags && prompt.tags.some(tag => tag.toLowerCase().includes(search)));
+            
+            const matchesCategory = !category || prompt.category === category;
+            
+            return matchesSearch && matchesCategory;
+        });
+        
+        displayPromptLibrary(filteredPrompts);
+    }
+    
+    // Load a prompt into the current editor
+    async function loadPrompt(promptId) {
+        try {
+            const response = await fetch(`/api/prompts/${promptId}/use`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ interval: intervalMs })
+                body: JSON.stringify({ sessionCode: sessionCode || 'web-interface' })
             });
             
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-            }
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
             
-            document.getElementById('startBtn').disabled = true;
-            document.getElementById('startBtn').classList.add('opacity-50', 'cursor-not-allowed');
-            document.getElementById('stopBtn').disabled = false;
-            document.getElementById('stopBtn').classList.remove('opacity-50', 'cursor-not-allowed');
+            const data = await response.json();
+            document.getElementById('promptText').value = data.prompt.content;
             
-            // Disable interval input while recording
-            document.getElementById('intervalInput').disabled = true;
-            document.getElementById('intervalInput').classList.add('opacity-50', 'cursor-not-allowed');
-
-            recordingStart = Date.now();
-            elapsedInterval = setInterval(() => {
-                const elapsed = Math.floor((Date.now() - recordingStart) / 1000);
-                const m = Math.floor(elapsed / 60);
-                const s = elapsed % 60;
-                document.getElementById('timeElapsed').textContent = `${m}:${s.toString().padStart(2,'0')}`;
-            }, 1000);
-
-            resetUI(true);
-
-            showTemporaryMessage('Recording started successfully!', 'success');
+            showPromptFeedback(`✅ Loaded prompt: "${data.prompt.title}"`, 'success');
+            
         } catch (err) {
-            console.error('Failed to start session:', err);
-            showErrorToast(`Failed to start recording: ${err.message}`);
+            console.error('❌ Failed to load prompt:', err);
+            showPromptFeedback(`❌ Failed to load prompt: ${err.message}`, 'error');
         }
-    });
+    }
     
-    document.getElementById('stopBtn').addEventListener('click', async () => {
+    // Open create prompt modal
+    function openCreatePromptModal() {
+        document.getElementById('createPromptModalTitle').textContent = 'Create New Prompt';
+        document.getElementById('createPromptSubmitText').textContent = 'Create Prompt';
+        document.getElementById('createPromptForm').reset();
+        document.getElementById('editPromptId').value = '';
+        document.getElementById('newPromptMode').value = 'summary';
+        document.getElementById('createPromptModal').classList.remove('hidden');
+    }
+    
+    // Close create prompt modal
+    function closeCreatePromptModal() {
+        document.getElementById('createPromptModal').classList.add('hidden');
+    }
+    
+    // Edit prompt
+    async function editPrompt(promptId) {
         try {
-            const response = await fetch(`/api/session/${sessionCode}/stop`, { method: 'POST' });
+            const response = await fetch(`/api/prompts/${promptId}`);
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
             
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-            }
+            const data = await response.json();
+            const prompt = data.prompt;
             
-            document.getElementById('startBtn').disabled = false;
-            document.getElementById('startBtn').classList.remove('opacity-50', 'cursor-not-allowed');
-            document.getElementById('stopBtn').disabled = true;
-            document.getElementById('stopBtn').classList.add('opacity-50', 'cursor-not-allowed');
+            document.getElementById('createPromptModalTitle').textContent = 'Edit Prompt';
+            document.getElementById('createPromptSubmitText').textContent = 'Update Prompt';
+            document.getElementById('editPromptId').value = prompt._id;
+            document.getElementById('newPromptTitle').value = prompt.title;
+            document.getElementById('newPromptDescription').value = prompt.description || '';
+            document.getElementById('newPromptContent').value = prompt.content;
+            document.getElementById('newPromptCategory').value = prompt.category;
+            document.getElementById('newPromptTags').value = prompt.tags ? prompt.tags.join(', ') : '';
+            document.getElementById('newPromptVisibility').value = prompt.isPublic.toString();
+            document.getElementById('newPromptAuthor').value = prompt.authorName || '';
+            document.getElementById('newPromptMode').value = prompt.mode;
             
-            // Re-enable interval input
-            document.getElementById('intervalInput').disabled = false;
-            document.getElementById('intervalInput').classList.remove('opacity-50', 'cursor-not-allowed');
-
-            if (elapsedInterval) {
-                clearInterval(elapsedInterval);
-                elapsedInterval = null;
-            }
-            document.getElementById('timeElapsed').textContent = '0:00';
-            showTemporaryMessage('Recording stopped successfully!', 'success');
+            document.getElementById('createPromptModal').classList.remove('hidden');
+            
         } catch (err) {
-            console.error('Failed to stop session:', err);
-            showErrorToast(`Failed to stop recording: ${err.message}`);
+            console.error('❌ Failed to load prompt for editing:', err);
+            alert(`Failed to load prompt: ${err.message}`);
         }
-    });
+    }
     
-    // Quit confirmation handlers
-    let hasStartedRecording = false;
-    
-    // Track if recording has started
-    document.getElementById('startBtn').addEventListener('click', () => {
-        hasStartedRecording = true;
-    });
-    
-    // Handle page unload - save data if session has started
-    window.addEventListener('unload', async () => {
-        // Stop heartbeat system
-        stopHeartbeat();
+    // Delete prompt
+    async function deletePrompt(promptId) {
+        const prompt = currentPrompts.find(p => p._id === promptId);
+        if (!prompt) return;
         
-        if (hasStartedRecording && sessionCode) {
-            try {
-                // Use sendBeacon for reliable data sending during page unload
-                const data = JSON.stringify({});
-                navigator.sendBeacon(`/api/session/${sessionCode}/stop`, data);
-            } catch (err) {
-                console.error('Failed to save session on unload:', err);
-            }
+        if (!confirm(`Are you sure you want to delete "${prompt.title}"? This action cannot be undone.`)) {
+            return;
         }
-    });
-    
-    // Cleanup on page beforeunload
-    window.addEventListener('beforeunload', (e) => {
-        stopHeartbeat();
         
-        if (hasStartedRecording) {
-            const message = 'Are you sure you want to leave? If you have started recording, the session data will be saved to the database, but the session will be ended.';
-            e.preventDefault();
-            e.returnValue = message;
-            return message;
+        try {
+            const response = await fetch(`/api/prompts/${promptId}`, { method: 'DELETE' });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            
+            showPromptFeedback(`✅ Deleted prompt: "${prompt.title}"`, 'success');
+            refreshPromptLibrary();
+            
+        } catch (err) {
+            console.error('❌ Failed to delete prompt:', err);
+            showPromptFeedback(`❌ Failed to delete prompt: ${err.message}`, 'error');
+        }
+    }
+    
+    // Handle create/edit prompt form submission
+    async function handleCreatePromptSubmit(e) {
+        e.preventDefault();
+        
+        const promptId = document.getElementById('editPromptId').value;
+        const isEdit = Boolean(promptId);
+        
+        const formData = {
+            title: document.getElementById('newPromptTitle').value,
+            description: document.getElementById('newPromptDescription').value,
+            content: document.getElementById('newPromptContent').value,
+            category: document.getElementById('newPromptCategory').value,
+            mode: document.getElementById('newPromptMode').value,
+            tags: document.getElementById('newPromptTags').value.split(',').map(tag => tag.trim()).filter(tag => tag),
+            isPublic: document.getElementById('newPromptVisibility').value === 'true',
+            authorName: document.getElementById('newPromptAuthor').value
+        };
+        
+        try {
+            const url = isEdit ? `/api/prompts/${promptId}` : '/api/prompts';
+            const method = isEdit ? 'PUT' : 'POST';
+            
+            const response = await fetch(url, {
+                method: method,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(formData)
+            });
+            
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            
+            const result = await response.json();
+            
+            showPromptFeedback(`✅ ${isEdit ? 'Updated' : 'Created'} prompt: "${formData.title}"`, 'success');
+            closeCreatePromptModal();
+            refreshPromptLibrary();
+            
+        } catch (err) {
+            console.error('❌ Failed to save prompt:', err);
+            alert(`Failed to save prompt: ${err.message}`);
+        }
+    }
+    
+    // Save current prompt as new
+    function saveCurrentPrompt() {
+        const currentPromptText = document.getElementById('promptText').value;
+        if (!currentPromptText.trim()) {
+            alert('Please enter a prompt first');
+            return;
+        }
+        
+        document.getElementById('newPromptContent').value = currentPromptText;
+        document.getElementById('newPromptTitle').value = '';
+        document.getElementById('newPromptDescription').value = '';
+        openCreatePromptModal();
+    }
+    
+    // Show prompt feedback
+    function showPromptFeedback(message, type = 'info') {
+        const feedback = document.getElementById('promptFeedback');
+        const bgColor = type === 'success' ? 'bg-green-100 text-green-800' : 
+                       type === 'error' ? 'bg-red-100 text-red-800' : 
+                       'bg-blue-100 text-blue-800';
+        
+        feedback.className = `p-4 rounded-lg ${bgColor}`;
+        feedback.textContent = message;
+        feedback.classList.remove('hidden');
+        
+        setTimeout(() => {
+            feedback.classList.add('hidden');
+        }, 5000);
+    }
+    
+    // Close modal on outside click
+    document.getElementById('createPromptModal').addEventListener('click', (e) => {
+        if (e.target.id === 'createPromptModal') {
+            closeCreatePromptModal();
         }
     });
     
-    // Handle history link with confirmation
-    document.querySelector('a[href="/history"]').addEventListener('click', (e) => {
-        if (hasStartedRecording) {
-            const confirmed = confirm('Are you sure you want to leave? If you have started recording, the session data will be saved to the database, but the session will be ended.');
-            if (!confirmed) {
-                e.preventDefault();
-                return false;
-            }
+    // ESC key to close modal
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && !document.getElementById('createPromptModal').classList.contains('hidden')) {
+            closeCreatePromptModal();
         }
     });
+
   </script>
 </body>
 </html>
