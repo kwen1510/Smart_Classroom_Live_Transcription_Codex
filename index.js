@@ -9,6 +9,8 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { ElevenLabsClient } from "@elevenlabs/elevenlabs-js";
 import multer from "multer";
+import cors from "cors";
+import fs from "fs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -19,6 +21,12 @@ console.log("🚀 Starting Smart Classroom Live Transcription Server...");
 const elevenlabs = new ElevenLabsClient({
   apiKey: process.env.ELEVENLABS_KEY,
 });
+
+// Sensitive logging control
+const DEBUG_LOGS = process.env.DEBUG_LOGS === 'true';
+const sensitiveLog = (...args) => {
+  if (DEBUG_LOGS) console.log(...args);
+};
 
 // Session state management
 const activeSessions = new Map(); // sessionCode -> { id, code, active, interval, startTime }
@@ -163,27 +171,59 @@ connectToDatabase();
 
 /* ---------- 2. Express + Socket.IO ---------- */
 const app = express();
+
+// CORS configuration
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || "").split(",").filter(Boolean);
+app.use(cors({
+  origin(origin, callback) {
+    if (!origin || allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true
+}));
+
 app.use(express.static(path.join(__dirname, "public")));
 
-// Setup multer for file uploads
-const upload = multer({ 
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 } // 10MB limit
+// Setup multer for file uploads using disk storage to avoid memory exhaustion
+fs.mkdirSync(path.join(__dirname, 'uploads'), { recursive: true });
+const upload = multer({
+  dest: path.join(__dirname, 'uploads'),
+  limits: { fileSize: 10 * 1024 * 1024 }
 });
 
 const http = createServer(app);
-const io   = new Server(http, { cors: { origin: "*" } });
+const io   = new Server(http, { cors: { origin: allowedOrigins.length > 0 ? allowedOrigins : true, credentials: true } });
+
+// Simple token-based authentication
+const ACCESS_TOKEN = process.env.ACCESS_TOKEN;
+function authenticate(req, res, next) {
+  if (!ACCESS_TOKEN) return next();
+  const auth = req.headers['authorization'];
+  const token = auth && auth.split(' ')[1];
+  if (token !== ACCESS_TOKEN) return res.status(401).send('Unauthorized');
+  next();
+}
+
+io.use((socket, next) => {
+  if (!ACCESS_TOKEN) return next();
+  const token = socket.handshake.auth?.token || socket.handshake.headers?.authorization?.split(' ')[1];
+  if (token !== ACCESS_TOKEN) return next(new Error('Unauthorized'));
+  next();
+});
 
 /* Serve student and admin pages */
-app.get("/student", (req, res) => {
+app.get("/student", authenticate, (req, res) => {
   console.log("📚 Serving student page");
   res.sendFile(path.join(__dirname, "public", "student.html"));
 });
-app.get("/admin", (req, res) => {
+app.get("/admin", authenticate, (req, res) => {
   console.log("👨‍🏫 Serving admin page");
   res.sendFile(path.join(__dirname, "public", "admin.html"));
 });
-app.get("/admin_static", (req, res) => {
+app.get("/admin_static", authenticate, (req, res) => {
   console.log("👨‍🏫 Serving static admin page");
   res.sendFile(path.join(__dirname, "public", "admin_static.html"));
 });
@@ -699,26 +739,22 @@ app.get("/api/history", async (req, res) => {
     
     console.log(`📊 Fetching historical data with filters:`, { sessionCode, startDate, endDate, limit, offset });
     
-    let sessionFilter = "";
-    let params = [];
-    
-    if (sessionCode) {
-      sessionFilter = " AND s.code = ?";
-      params.push(sessionCode);
+    // Build query filters
+    const query = {};
+    if (sessionCode) query.code = sessionCode;
+    if (startDate || endDate) {
+      query.created_at = {};
+      if (startDate) query.created_at.$gte = new Date(startDate).getTime();
+      if (endDate) query.created_at.$lte = new Date(endDate).getTime();
     }
-    
-    if (startDate) {
-      sessionFilter += " AND s.created_at >= ?";
-      params.push(new Date(startDate).getTime());
-    }
-    
-    if (endDate) {
-      sessionFilter += " AND s.created_at <= ?";
-      params.push(new Date(endDate).getTime());
-    }
-    
+
     // Get sessions with basic info
-    const sessions = await db.collection("sessions").find({}).sort({ created_at: -1 }).skip(parseInt(offset)).limit(parseInt(limit)).toArray();
+    const sessions = await db.collection("sessions")
+      .find(query)
+      .sort({ created_at: -1 })
+      .skip(parseInt(offset))
+      .limit(parseInt(limit))
+      .toArray();
     
     const result = {
       sessions: await Promise.all(sessions.map(async s => {
@@ -873,15 +909,23 @@ app.get("/api/history/session/:code", async (req, res) => {
 app.delete("/api/history/sessions", express.json(), async (req, res) => {
   try {
     const { sessionIds } = req.body;
-    
+
     if (!Array.isArray(sessionIds) || sessionIds.length === 0) {
       return res.status(400).json({ error: "Invalid session IDs provided" });
     }
-    
-    console.log(`🗑️  Deleting ${sessionIds.length} sessions:`, sessionIds);
-    
+
+    // Validate and convert IDs
+    let objectIds;
+    try {
+      objectIds = sessionIds.map(id => new ObjectId(id));
+    } catch {
+      return res.status(400).json({ error: "Invalid session ID format" });
+    }
+
+    console.log(`🗑️  Deleting ${objectIds.length} sessions:`, objectIds);
+
     // Get session details first for cleanup
-    const sessions = await db.collection("sessions").find({ _id: { $in: sessionIds } }).toArray();
+    const sessions = await db.collection("sessions").find({ _id: { $in: objectIds } }).toArray();
     
     if (sessions.length === 0) {
       return res.status(404).json({ error: "No sessions found to delete" });
@@ -920,7 +964,7 @@ app.delete("/api/history/sessions", express.json(), async (req, res) => {
     }
     
     // Delete the sessions themselves
-    const deleteResult = await db.collection("sessions").deleteMany({ _id: { $in: sessionIds } });
+    const deleteResult = await db.collection("sessions").deleteMany({ _id: { $in: objectIds } });
     
     console.log(`✅ Deleted ${deleteResult.deletedCount} sessions successfully`);
     
@@ -3710,7 +3754,7 @@ app.post("/api/transcribe-chunk", upload.single('file'), async (req, res) => {
       retryCount: retryCount
     };
     
-    console.log("📝 Chunk transcription result:", {
+    sensitiveLog("📝 Chunk transcription result:", {
       text: transcriptionText.substring(0, 100) + (transcriptionText.length > 100 ? "..." : ""),
       wordCount: finalResult.transcription.wordCount,
       duration: finalResult.transcription.duration,
@@ -3774,7 +3818,7 @@ async function processTranscriptionForGroup(session, group, transcriptionText, r
                    /^\([^)]*\)\s*\([^)]*\)$/.test(lowerText); // Only parenthetical descriptions
     
     if (isNoise) {
-      console.log(`🔇 Noise/background transcript (still logging to UI): "${transcriptionText.substring(0, 50)}..."`);
+      sensitiveLog(`🔇 Noise/background transcript (still logging to UI): "${transcriptionText.substring(0, 50)}..."`);
       // Log minimal transcript entry for timeline
       const transcriptId = uuid();
       await db.collection("transcripts").insertOne({
@@ -3848,8 +3892,8 @@ async function processTranscriptionForGroup(session, group, transcriptionText, r
         transcriptTexts.push(transcriptionText); // Add current transcript as the most recent
         const concatenatedText = transcriptTexts.join(' ');
         
-        console.log(`📋 Concatenating ${transcriptTexts.length} recent transcripts for analysis`);
-        console.log(`📋 Transcript chunks: [${transcriptTexts.map(t => t.substring(0, 30) + '...').join('], [')}]`);
+        sensitiveLog(`📋 Concatenating ${transcriptTexts.length} recent transcripts for analysis`);
+        sensitiveLog(`📋 Transcript chunks: [${transcriptTexts.map(t => t.substring(0, 30) + '...').join('], [')}]`);
         
         // Get existing progress for this group to avoid re-evaluating GREEN criteria
         const existingProgressRecords = await db.collection("checkbox_progress")
@@ -4044,7 +4088,7 @@ async function processTranscriptionForGroup(session, group, transcriptionText, r
       
     } else {
       // Regular summary mode processing
-      console.log(`📝 Processing summary mode transcript for session ${sessionCode}, group ${groupNumber}`);
+      sensitiveLog(`📝 Processing summary mode transcript for session ${sessionCode}, group ${groupNumber}`);
     
     // Get all transcripts for this group to create cumulative conversation
     const allTranscripts = await db.collection("transcripts").find({ 
@@ -4132,8 +4176,8 @@ app.post("/api/checkbox/test", express.json(), async (req, res) => {
     const { sessionCode, transcript } = req.body;
     
     console.log(`🧪 TEST MODE ACTIVATED for session ${sessionCode}`);
-    console.log(`🧪 Test transcript length: ${transcript?.length || 0} characters`);
-    console.log(`🧪 Test transcript preview: "${transcript?.substring(0, 100)}..."`);
+    sensitiveLog(`🧪 Test transcript length: ${transcript?.length || 0} characters`);
+    sensitiveLog(`🧪 Test transcript preview: "${transcript?.substring(0, 100)}..."`);
     
     // Forward to regular checkbox processing but with test logging
     const result = await processTestTranscript(sessionCode, transcript);
@@ -4233,7 +4277,7 @@ app.post("/api/transcribe-mindmap-chunk", upload.single('file'), async (req, res
       });
     }
 
-    console.log(`📝 Transcription successful: "${transcript}"`);
+    sensitiveLog(`📝 Transcription successful: "${transcript}"`);
     
     // Add to transcript history for context
     addToTranscriptHistory(sessionCode, transcript);

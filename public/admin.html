@@ -560,6 +560,12 @@
 
   <script>
     const socket = io();
+
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
     let sessionCode = null;
     const groups = new Map();
     let elapsedInterval = null;
@@ -996,8 +1002,10 @@
     // Format summary text with proper bullet points and line breaks
     function formatSummaryText(text) {
         if (!text) return '';
-        
-        return text
+
+        const escaped = escapeHtml(text);
+
+        return escaped
             // Replace bullet point markers with HTML
             .replace(/^[-•·*]\s+/gm, '<li>')
             .replace(/^\d+\.\s+/gm, '<li>')
@@ -1205,9 +1213,9 @@
                                                 <span class="text-xs font-medium text-blue-600 bg-blue-100 px-2 py-1 rounded uppercase tracking-wide">Full Conversation</span>
                                                 <span class="ml-2 text-xs text-gray-500">${formatTime(latestTranscript.timestamp)}</span>
                                             </div>
-                                            <div class="text-gray-800 mb-3 leading-relaxed">${groupData.cumulativeTranscript}</div>
+                                            <div class="text-gray-800 mb-3 leading-relaxed">${escapeHtml(groupData.cumulativeTranscript)}</div>
                                             <div class="text-xs text-gray-500 border-t pt-2 mt-2">
-                                                <span class="font-medium">Latest chunk:</span> "${latestTranscript.text}"
+                                                <span class="font-medium">Latest chunk:</span> "${escapeHtml(latestTranscript.text)}"
                                             </div>
                                         </div>
                                     `;
@@ -1219,7 +1227,7 @@
                                                 <span class="text-xs font-medium text-blue-600 bg-blue-100 px-2 py-1 rounded uppercase tracking-wide">Latest Transcript</span>
                                                 <span class="ml-2 text-xs text-gray-500">${latestTranscript.duration ? `${latestTranscript.duration.toFixed(1)}s` : 'Unknown duration'}</span>
                                             </div>
-                                            <div class="text-gray-800 mb-2 font-medium leading-relaxed">${latestTranscript.text}</div>
+                                            <div class="text-gray-800 mb-2 font-medium leading-relaxed">${escapeHtml(latestTranscript.text)}</div>
                                             <div class="flex items-center justify-between text-xs text-gray-500">
                                                 <span>${formatTime(latestTranscript.timestamp)}</span>
                                                 ${latestTranscript.wordCount ? `<span>${latestTranscript.wordCount} words</span>` : ''}
@@ -1235,10 +1243,10 @@
                                         <div class="space-y-2">
                                             ${previousTranscripts.map(transcript => `
                                                 <div class="bg-gray-50 rounded p-3 text-sm">
-                                                    <div class="text-gray-800 mb-1">${transcript.text}</div>
+                                                    <div class="text-gray-800 mb-1">${escapeHtml(transcript.text)}</div>
                                                     <div class="text-xs text-gray-500">
-                                                        ${formatTime(transcript.timestamp)} • 
-                                                        ${transcript.wordCount} words • 
+                                                        ${formatTime(transcript.timestamp)} •
+                                                        ${transcript.wordCount} words •
                                                         ${transcript.duration ? transcript.duration.toFixed(1) + 's' : 'No duration'}
                                                     </div>
                                                 </div>
