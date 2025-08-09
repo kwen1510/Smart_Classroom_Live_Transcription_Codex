@@ -240,6 +240,12 @@
             document.getElementById('joinSessionForm').dispatchEvent(new Event('submit'));
         }
 
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
         function resetView() {
             document.getElementById('latestTranscript').innerHTML = '';
             document.getElementById('olderTranscripts').innerHTML = '';
@@ -581,7 +587,7 @@
                     </div>
                     <div class="ml-3">
                         <h3 class="text-sm font-medium text-red-800">Upload Error</h3>
-                        <p class="mt-1 text-sm text-red-600">${message}</p>
+                        <p class="mt-1 text-sm text-red-600">${escapeHtml(message)}</p>
                         <p class="mt-1 text-xs text-red-500">The recording will continue. This chunk will be skipped.</p>
                     </div>
                     <div class="ml-auto pl-3">
@@ -744,10 +750,10 @@
                     <span class="ml-2 text-xs text-gray-500">${new Date().toLocaleTimeString()}</span>
                 </div>
                 <div class="transcript-content mb-3">
-                    <div class="text-gray-800 leading-relaxed">${cumulativeText || text}</div>
+                    <div class="text-gray-800 leading-relaxed">${escapeHtml(cumulativeText || text)}</div>
                 </div>
                 <div class="text-xs text-gray-500 border-t pt-2 mt-2">
-                    <span class="font-medium">Latest chunk:</span> "${text}"
+                    <span class="font-medium">Latest chunk:</span> "${escapeHtml(text)}"
                 </div>
             `;
             
@@ -764,7 +770,7 @@
             summaryArea.innerHTML = `
                 <div class="bg-gradient-to-r from-purple-50 to-indigo-50 rounded-lg p-6 border-l-4 border-purple-400 h-full">
                     <div class="prose prose-purple max-w-none">
-                        <div class="text-gray-800 leading-relaxed whitespace-pre-line">${summary}</div>
+                        <div class="text-gray-800 leading-relaxed whitespace-pre-line">${escapeHtml(summary)}</div>
                     </div>
                 </div>
             `;
