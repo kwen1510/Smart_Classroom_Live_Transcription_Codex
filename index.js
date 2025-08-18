@@ -9,8 +9,6 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { ElevenLabsClient } from "@elevenlabs/elevenlabs-js";
 import multer from "multer";
-import cors from "cors";
-import fs from "fs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -21,12 +19,6 @@ console.log("🚀 Starting Smart Classroom Live Transcription Server...");
 const elevenlabs = new ElevenLabsClient({
   apiKey: process.env.ELEVENLABS_KEY,
 });
-
-// Sensitive logging control
-const DEBUG_LOGS = process.env.DEBUG_LOGS === 'true';
-const sensitiveLog = (...args) => {
-  if (DEBUG_LOGS) console.log(...args);
-};
 
 // Session state management
 const activeSessions = new Map(); // sessionCode -> { id, code, active, interval, startTime }
@@ -171,59 +163,27 @@ connectToDatabase();
 
 /* ---------- 2. Express + Socket.IO ---------- */
 const app = express();
-
-// CORS configuration
-const allowedOrigins = (process.env.ALLOWED_ORIGINS || "").split(",").filter(Boolean);
-app.use(cors({
-  origin(origin, callback) {
-    if (!origin || allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
-  credentials: true
-}));
-
 app.use(express.static(path.join(__dirname, "public")));
 
-// Setup multer for file uploads using disk storage to avoid memory exhaustion
-fs.mkdirSync(path.join(__dirname, 'uploads'), { recursive: true });
-const upload = multer({
-  dest: path.join(__dirname, 'uploads'),
-  limits: { fileSize: 10 * 1024 * 1024 }
+// Setup multer for file uploads
+const upload = multer({ 
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 } // 10MB limit
 });
 
 const http = createServer(app);
-const io   = new Server(http, { cors: { origin: allowedOrigins.length > 0 ? allowedOrigins : true, credentials: true } });
-
-// Simple token-based authentication
-const ACCESS_TOKEN = process.env.ACCESS_TOKEN;
-function authenticate(req, res, next) {
-  if (!ACCESS_TOKEN) return next();
-  const auth = req.headers['authorization'];
-  const token = auth && auth.split(' ')[1];
-  if (token !== ACCESS_TOKEN) return res.status(401).send('Unauthorized');
-  next();
-}
-
-io.use((socket, next) => {
-  if (!ACCESS_TOKEN) return next();
-  const token = socket.handshake.auth?.token || socket.handshake.headers?.authorization?.split(' ')[1];
-  if (token !== ACCESS_TOKEN) return next(new Error('Unauthorized'));
-  next();
-});
+const io   = new Server(http, { cors: { origin: "*" } });
 
 /* Serve student and admin pages */
-app.get("/student", authenticate, (req, res) => {
+app.get("/student", (req, res) => {
   console.log("📚 Serving student page");
   res.sendFile(path.join(__dirname, "public", "student.html"));
 });
-app.get("/admin", authenticate, (req, res) => {
+app.get("/admin", (req, res) => {
   console.log("👨‍🏫 Serving admin page");
   res.sendFile(path.join(__dirname, "public", "admin.html"));
 });
-app.get("/admin_static", authenticate, (req, res) => {
+app.get("/admin_static", (req, res) => {
   console.log("👨‍🏫 Serving static admin page");
   res.sendFile(path.join(__dirname, "public", "admin_static.html"));
 });
@@ -373,10 +333,7 @@ app.post("/api/session/:code/prompt", express.json(), async (req, res) => {
       session = { _id: newId };
     }
     
-    // Clean up any old data for this session to ensure fresh start
-    if (session) {
-      await cleanupOldSessionData(sessionCode);
-    }
+    // Do NOT cleanup transcripts/summaries on prompt save
     
     // Save prompt for this session
     await db.collection("session_prompts").findOneAndUpdate(
@@ -384,6 +341,12 @@ app.post("/api/session/:code/prompt", express.json(), async (req, res) => {
       { $set: { prompt: prompt.trim(), updated_at: Date.now() } },
       { upsert: true }
     );
+
+    // Also cache the current prompt in memory so subsequent summaries use it immediately
+    const mem = activeSessions.get(code);
+    if (mem) {
+      activeSessions.set(code, { ...mem, customPrompt: prompt.trim() });
+    }
     
     console.log(`💾 Saved custom prompt for session ${code}`);
     res.json({ success: true, message: "Prompt saved successfully" });
@@ -613,6 +576,45 @@ app.post("/api/session/:code/start", express.json(), async (req, res) => {
     io.to(code).emit("session_reset");
 
     io.to(code).emit("record_now", interval || 30000);
+
+    // Reliability: continual retries until explicit client ack (recording_started) or timeout
+    const mem = activeSessions.get(code);
+    if (mem) {
+      if (!mem.groups) mem.groups = new Map();
+      // Configure retry scheduler (every 4s, up to 30s)
+      if (mem.startRetryInterval) clearInterval(mem.startRetryInterval);
+      mem.startRetryUntil = Date.now() + 30000;
+      mem.active = true;
+      mem.startRetryInterval = setInterval(() => {
+        try {
+          const current = activeSessions.get(code);
+          if (!current || !current.groups || !current.active) {
+            clearInterval(mem.startRetryInterval);
+            return;
+          }
+          const pending = [];
+          current.groups.forEach((state, grp) => {
+            if (state?.joined && !state?.recording) pending.push(grp);
+          });
+          if (pending.length === 0 || Date.now() > current.startRetryUntil) {
+            clearInterval(current.startRetryInterval);
+            current.startRetryInterval = null;
+            activeSessions.set(code, current);
+            if (pending.length === 0) {
+              console.log("✅ All groups acknowledged recording start");
+            } else {
+              console.log(`⏱️ Retry window ended. Pending groups without ack: [${pending.join(', ')}]`);
+            }
+            return;
+          }
+          console.log(`🔄 Re-emitting record_now to pending groups: [${pending.join(', ')}]`);
+          pending.forEach(grp => io.to(`${code}-${grp}`).emit("record_now", interval || 30000));
+        } catch (e) {
+          console.warn("⚠️ record_now scheduler error:", e.message);
+        }
+      }, 4000);
+      activeSessions.set(code, mem);
+    }
     
     console.log(`▶️  Session ${code} started recording (interval: ${interval || 30000}ms)`);
     res.json({ ok: true });
@@ -656,6 +658,10 @@ app.post("/api/session/:code/stop", async (req, res) => {
     // Update memory state
     sessionState.active = false;
     sessionState.startTime = null;
+    if (sessionState.startRetryInterval) {
+      clearInterval(sessionState.startRetryInterval);
+      sessionState.startRetryInterval = null;
+    }
     
     io.to(code).emit("stop_recording");
     
@@ -739,22 +745,26 @@ app.get("/api/history", async (req, res) => {
     
     console.log(`📊 Fetching historical data with filters:`, { sessionCode, startDate, endDate, limit, offset });
     
-    // Build query filters
-    const query = {};
-    if (sessionCode) query.code = sessionCode;
-    if (startDate || endDate) {
-      query.created_at = {};
-      if (startDate) query.created_at.$gte = new Date(startDate).getTime();
-      if (endDate) query.created_at.$lte = new Date(endDate).getTime();
+    let sessionFilter = "";
+    let params = [];
+    
+    if (sessionCode) {
+      sessionFilter = " AND s.code = ?";
+      params.push(sessionCode);
     }
-
+    
+    if (startDate) {
+      sessionFilter += " AND s.created_at >= ?";
+      params.push(new Date(startDate).getTime());
+    }
+    
+    if (endDate) {
+      sessionFilter += " AND s.created_at <= ?";
+      params.push(new Date(endDate).getTime());
+    }
+    
     // Get sessions with basic info
-    const sessions = await db.collection("sessions")
-      .find(query)
-      .sort({ created_at: -1 })
-      .skip(parseInt(offset))
-      .limit(parseInt(limit))
-      .toArray();
+    const sessions = await db.collection("sessions").find({}).sort({ created_at: -1 }).skip(parseInt(offset)).limit(parseInt(limit)).toArray();
     
     const result = {
       sessions: await Promise.all(sessions.map(async s => {
@@ -909,23 +919,15 @@ app.get("/api/history/session/:code", async (req, res) => {
 app.delete("/api/history/sessions", express.json(), async (req, res) => {
   try {
     const { sessionIds } = req.body;
-
+    
     if (!Array.isArray(sessionIds) || sessionIds.length === 0) {
       return res.status(400).json({ error: "Invalid session IDs provided" });
     }
-
-    // Validate and convert IDs
-    let objectIds;
-    try {
-      objectIds = sessionIds.map(id => new ObjectId(id));
-    } catch {
-      return res.status(400).json({ error: "Invalid session ID format" });
-    }
-
-    console.log(`🗑️  Deleting ${objectIds.length} sessions:`, objectIds);
-
+    
+    console.log(`🗑️  Deleting ${sessionIds.length} sessions:`, sessionIds);
+    
     // Get session details first for cleanup
-    const sessions = await db.collection("sessions").find({ _id: { $in: objectIds } }).toArray();
+    const sessions = await db.collection("sessions").find({ _id: { $in: sessionIds } }).toArray();
     
     if (sessions.length === 0) {
       return res.status(404).json({ error: "No sessions found to delete" });
@@ -964,7 +966,7 @@ app.delete("/api/history/sessions", express.json(), async (req, res) => {
     }
     
     // Delete the sessions themselves
-    const deleteResult = await db.collection("sessions").deleteMany({ _id: { $in: objectIds } });
+    const deleteResult = await db.collection("sessions").deleteMany({ _id: { $in: sessionIds } });
     
     console.log(`✅ Deleted ${deleteResult.deletedCount} sessions successfully`);
     
@@ -1782,6 +1784,7 @@ app.post("/api/checkbox/session", express.json(), async (req, res) => {
     await db.collection("checkbox_progress").deleteMany({ session_id: session._id });
     
     const criteriaIds = [];
+    const memCriteria = [];
     for (let index = 0; index < criteria.length; index++) {
       const criterion = criteria[index];
       const criterionId = uuid();
@@ -1795,6 +1798,12 @@ app.post("/api/checkbox/session", express.json(), async (req, res) => {
         created_at: Date.now()
       });
       criteriaIds.push(criterionId);
+      memCriteria.push({
+        _id: criterionId,
+        description: criterion.description,
+        rubric: criterion.rubric || '',
+        order_index: index
+      });
       
       // Initialize progress records for each group (1-10 for now)
       // This ensures all criteria have a baseline state
@@ -1812,7 +1821,8 @@ app.post("/api/checkbox/session", express.json(), async (req, res) => {
       }
     }
     
-    // Add to active sessions
+    // Add to/update active sessions and cache current checkbox config in memory
+    const existingMem = activeSessions.get(sessionCode) || {};
     activeSessions.set(sessionCode, {
       id: session._id,
       code: sessionCode,
@@ -1820,8 +1830,13 @@ app.post("/api/checkbox/session", express.json(), async (req, res) => {
       active: false, // Stay inactive until /api/session/:code/start is called
       interval: interval,
       startTime: null,
-      created_at: Date.now(),
-      persisted: true
+      created_at: existingMem.created_at || Date.now(),
+      persisted: true,
+      checkbox: {
+        scenario: scenario || "",
+        criteria: memCriteria,
+        strictness
+      }
     });
     
     res.json({
@@ -1840,7 +1855,7 @@ app.post("/api/checkbox/session", express.json(), async (req, res) => {
 /* Process transcript for checkbox */
 app.post("/api/checkbox/process", express.json(), async (req, res) => {
   try {
-    const { sessionCode, transcript, groupNumber = 1 } = req.body; // Add groupNumber with default
+    const { sessionCode, transcript, groupNumber = 1, criteria: clientCriteria, scenario: clientScenario } = req.body; // allow client-provided config
     
     if (!sessionCode || !transcript) {
       return res.status(400).json({ error: "Session code and transcript required" });
@@ -1854,16 +1869,30 @@ app.post("/api/checkbox/process", express.json(), async (req, res) => {
       return res.status(404).json({ error: "Checkbox session not found" });
     }
     
-    // Get checkbox session data (includes scenario)
-    const checkboxSession = await db.collection("checkbox_sessions").findOne({ session_id: session._id });
-    const scenario = checkboxSession?.scenario || "";
-    const strictness = session.strictness || 2; // Get strictness from session
-    
-    // Get criteria
-    const criteria = await db.collection("checkbox_criteria")
-      .find({ session_id: session._id })
-      .sort({ order_index: 1, created_at: 1 })
-      .toArray();
+    // Prefer client-provided or in-memory scenario/criteria for speed
+    const mem = activeSessions.get(sessionCode);
+    const strictness = session.strictness || 2;
+    let scenario = clientScenario ?? mem?.checkbox?.scenario ?? "";
+    let criteria = clientCriteria ?? mem?.checkbox?.criteria;
+
+    // Fallback to DB only if not provided
+    if (!criteria || criteria.length === 0) {
+      criteria = await db.collection("checkbox_criteria")
+        .find({ session_id: session._id })
+        .sort({ order_index: 1, created_at: 1 })
+        .toArray();
+    }
+    if (!scenario) {
+      const checkboxSession = await db.collection("checkbox_sessions").findOne({ session_id: session._id });
+      scenario = checkboxSession?.scenario || "";
+    }
+
+    // Normalize criteria to expected shape and drop any hardcoded/default leftovers
+    criteria = (criteria || []).map((c, index) => ({
+      originalIndex: typeof c.originalIndex === 'number' ? c.originalIndex : index,
+      description: (c.description || '').toString(),
+      rubric: (c.rubric || '').toString()
+    }));
     
     if (criteria.length === 0) {
       return res.status(400).json({ error: "No criteria found for session" });
@@ -1901,7 +1930,7 @@ app.post("/api/checkbox/process", express.json(), async (req, res) => {
     // Process the transcript with scenario context and strictness
     const result = await processCheckboxTranscript(transcript, criteria, scenario, strictness, existingProgress);
     
-    // Log the processing result
+    // Log the processing result (persist once per round)
     await db.collection("session_logs").insertOne({
       _id: uuid(),
       session_id: session._id,
@@ -2367,8 +2396,9 @@ async function generateSummaryForGroup(sessionCode, groupNumber) {
           console.log("🤖 Generating summary of full conversation...");
           
           // Get custom prompt for this session
-          let customPrompt = null;
-          if (session) {
+          // Resolve the latest prompt: prefer memory cache (if admin changed it mid-session), fall back to DB
+          let customPrompt = activeSessions.get(sessionCode)?.customPrompt || null;
+          if (!customPrompt && session) {
             const promptData = await db.collection("session_prompts").findOne({ session_id: session._id });
             customPrompt = promptData?.prompt || null;
           }
@@ -2436,6 +2466,20 @@ async function cleanTranscriptWithAnthropic(text) {
 io.on("connection", socket => {
   console.log(`🔌 New socket connection: ${socket.id}`);
   let groupId, localBuf = [], sessionCode, groupNumber;
+
+  // Live prompt updates from admin: keep latest prompt in memory to avoid DB reads
+  socket.on('prompt_update', data => {
+    try {
+      const { sessionCode: code, prompt } = data || {};
+      if (!code || typeof prompt !== 'string') return;
+      const mem = activeSessions.get(code);
+      if (mem) {
+        activeSessions.set(code, { ...mem, customPrompt: prompt });
+      }
+    } catch (e) {
+      console.warn('⚠️ prompt_update handling error:', e.message);
+    }
+  });
   
   // Attach buffer to socket for auto-summary access
   socket.localBuf = localBuf;
@@ -2504,9 +2548,20 @@ io.on("connection", socket => {
       if (sessionState.active) {
         socket.emit("joined", { code, group, status: "recording", interval: sessionState.interval || 30000 });
         console.log(`✅ Socket ${socket.id} joined ACTIVE session ${code}, group ${group}`);
+        // Track joined group for reliability retries
+        const mem = activeSessions.get(code) || {};
+        if (!mem.groups) mem.groups = new Map();
+        mem.groups.set(parseInt(group), { joined: true, recording: false, lastAck: Date.now() });
+        activeSessions.set(code, mem);
+        // Immediate emit to this group if server is active and not yet recording
+        io.to(`${code}-${parseInt(group)}`).emit("record_now", sessionState.interval || 30000);
       } else {
         socket.emit("joined", { code, group, status: "waiting", interval: sessionState.interval || 30000 });
         console.log(`✅ Socket ${socket.id} joined INACTIVE session ${code}, group ${group} - waiting for start`);
+        const mem = activeSessions.get(code) || {};
+        if (!mem.groups) mem.groups = new Map();
+        mem.groups.set(parseInt(group), { joined: true, recording: false, lastAck: Date.now() });
+        activeSessions.set(code, mem);
       }
       
       // Notify admin about student joining
@@ -2528,6 +2583,35 @@ io.on("connection", socket => {
   socket.on("heartbeat", ({ session, group }) => {
     console.log(`[${ts()}] 💓 Heartbeat from session ${session}, group ${group} (socket: ${socket.id})`);
     socket.emit("heartbeat_ack");
+    // Mark group alive; if session active, also flag as recording
+    const mem = activeSessions.get(session);
+    if (mem) {
+      if (!mem.groups) mem.groups = new Map();
+      const st = mem.groups.get(parseInt(group)) || {};
+      st.joined = true;
+      st.lastAck = Date.now();
+      if (mem.active) st.recording = true;
+      mem.groups.set(parseInt(group), st);
+      activeSessions.set(session, mem);
+    }
+  });
+
+  // Explicit client acknowledgement when recording actually starts
+  socket.on('recording_started', ({ session, group, interval }) => {
+    try {
+      const mem = activeSessions.get(session);
+      if (!mem) return;
+      if (!mem.groups) mem.groups = new Map();
+      const st = mem.groups.get(parseInt(group)) || {};
+      st.joined = true;
+      st.recording = true;
+      st.lastAck = Date.now();
+      mem.groups.set(parseInt(group), st);
+      activeSessions.set(session, mem);
+      console.log(`✅ recording_started ack from group ${group} (session ${session})`);
+    } catch (e) {
+      console.warn('⚠️ recording_started handler error:', e.message);
+    }
   });
 
   // Handle admin heartbeat
@@ -2535,6 +2619,29 @@ io.on("connection", socket => {
     console.log(`[${ts()}] 💓 Admin heartbeat from session ${sessionCode} (socket: ${socket.id})`);
     socket.emit("admin_heartbeat_ack");
   });
+
+  // Optional: server-side keepalive ping back every 10s to all sockets in same room
+  // This helps some proxies keep connections warm
+
+  /* ===== DEV ONLY: Simulate disconnect test (guarded by env) ===== */
+  socket.on('dev_simulate_disconnect', ({ sessionCode: code, target = 'all', group = 1, durationMs = 5000 }) => {
+    if (!process.env.ALLOW_DEV_TEST) {
+      console.log('🚫 dev_simulate_disconnect ignored (ALLOW_DEV_TEST not set)');
+      return;
+    }
+    try {
+      console.log(`🧪 DEV: simulate disconnect → session ${code}, target=${target}, group=${group}, duration=${durationMs}ms`);
+      const payload = { durationMs: Number(durationMs) || 5000 };
+      if (target === 'all') {
+        io.to(code).emit('dev_simulate_disconnect', payload);
+      } else {
+        io.to(`${code}-${parseInt(group)}`).emit('dev_simulate_disconnect', payload);
+      }
+    } catch (e) {
+      console.warn('⚠️ dev_simulate_disconnect error:', e.message);
+    }
+  });
+  /* ===== END DEV ONLY ===== */
 
   // Handle upload errors from students
   socket.on("upload_error", ({ session, group, error, chunkSize, timestamp }) => {
@@ -3754,7 +3861,7 @@ app.post("/api/transcribe-chunk", upload.single('file'), async (req, res) => {
       retryCount: retryCount
     };
     
-    sensitiveLog("📝 Chunk transcription result:", {
+    console.log("📝 Chunk transcription result:", {
       text: transcriptionText.substring(0, 100) + (transcriptionText.length > 100 ? "..." : ""),
       wordCount: finalResult.transcription.wordCount,
       duration: finalResult.transcription.duration,
@@ -3818,7 +3925,7 @@ async function processTranscriptionForGroup(session, group, transcriptionText, r
                    /^\([^)]*\)\s*\([^)]*\)$/.test(lowerText); // Only parenthetical descriptions
     
     if (isNoise) {
-      sensitiveLog(`🔇 Noise/background transcript (still logging to UI): "${transcriptionText.substring(0, 50)}..."`);
+      console.log(`🔇 Noise/background transcript (still logging to UI): "${transcriptionText.substring(0, 50)}..."`);
       // Log minimal transcript entry for timeline
       const transcriptId = uuid();
       await db.collection("transcripts").insertOne({
@@ -3874,26 +3981,18 @@ async function processTranscriptionForGroup(session, group, transcriptionText, r
         .toArray();
       
       if (criteria.length > 0) {
-        // Get the 3 most recent transcripts for this group
-        const RECENT_CHUNKS_TO_ANALYZE = 3;
-        const recentTranscripts = await db.collection("transcripts")
+        // Get the entire conversation so far for this group (full context)
+        const allTranscriptsForGroup = await db.collection("transcripts")
           .find({ 
             group_id: group._id
           })
-          .sort({ created_at: -1 }) // Sort descending to get most recent first
-          .limit(RECENT_CHUNKS_TO_ANALYZE - 1) // Get 2 previous chunks (current will be the 3rd)
+          .sort({ created_at: 1 }) // Chronological order
           .toArray();
         
-        // Reverse to get chronological order (oldest to newest)
-        recentTranscripts.reverse();
+        // Join everything up to the current point
+        const concatenatedText = allTranscriptsForGroup.map(t => t.text).join(' ').trim();
         
-        // Concatenate recent transcripts including the current one
-        const transcriptTexts = recentTranscripts.map(t => t.text);
-        transcriptTexts.push(transcriptionText); // Add current transcript as the most recent
-        const concatenatedText = transcriptTexts.join(' ');
-        
-        sensitiveLog(`📋 Concatenating ${transcriptTexts.length} recent transcripts for analysis`);
-        sensitiveLog(`📋 Transcript chunks: [${transcriptTexts.map(t => t.substring(0, 30) + '...').join('], [')}]`);
+        console.log(`📋 Using FULL context for checkbox analysis: ${allTranscriptsForGroup.length} segments`);
         
         // Get existing progress for this group to avoid re-evaluating GREEN criteria
         const existingProgressRecords = await db.collection("checkbox_progress")
@@ -4088,7 +4187,7 @@ async function processTranscriptionForGroup(session, group, transcriptionText, r
       
     } else {
       // Regular summary mode processing
-      sensitiveLog(`📝 Processing summary mode transcript for session ${sessionCode}, group ${groupNumber}`);
+      console.log(`📝 Processing summary mode transcript for session ${sessionCode}, group ${groupNumber}`);
     
     // Get all transcripts for this group to create cumulative conversation
     const allTranscripts = await db.collection("transcripts").find({ 
@@ -4102,8 +4201,9 @@ async function processTranscriptionForGroup(session, group, transcriptionText, r
     console.log("🤖 Generating summary of full conversation...");
     
     // Get custom prompt for this session
-    let customPrompt = null;
-    if (session) {
+    // Resolve the latest prompt: prefer memory cache, fall back to DB
+    let customPrompt = activeSessions.get(sessionCode)?.customPrompt || null;
+    if (!customPrompt && session) {
       const promptData = await db.collection("session_prompts").findOne({ session_id: session._id });
       customPrompt = promptData?.prompt || null;
     }
@@ -4176,8 +4276,8 @@ app.post("/api/checkbox/test", express.json(), async (req, res) => {
     const { sessionCode, transcript } = req.body;
     
     console.log(`🧪 TEST MODE ACTIVATED for session ${sessionCode}`);
-    sensitiveLog(`🧪 Test transcript length: ${transcript?.length || 0} characters`);
-    sensitiveLog(`🧪 Test transcript preview: "${transcript?.substring(0, 100)}..."`);
+    console.log(`🧪 Test transcript length: ${transcript?.length || 0} characters`);
+    console.log(`🧪 Test transcript preview: "${transcript?.substring(0, 100)}..."`);
     
     // Forward to regular checkbox processing but with test logging
     const result = await processTestTranscript(sessionCode, transcript);
@@ -4277,7 +4377,7 @@ app.post("/api/transcribe-mindmap-chunk", upload.single('file'), async (req, res
       });
     }
 
-    sensitiveLog(`📝 Transcription successful: "${transcript}"`);
+    console.log(`📝 Transcription successful: "${transcript}"`);
     
     // Add to transcript history for context
     addToTranscriptHistory(sessionCode, transcript);

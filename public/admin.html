@@ -560,12 +560,6 @@
 
   <script>
     const socket = io();
-
-    function escapeHtml(text) {
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
-    }
     let sessionCode = null;
     const groups = new Map();
     let elapsedInterval = null;
@@ -693,26 +687,26 @@
     
     // Start heartbeat system
     function startHeartbeat() {
-        // Send heartbeat every 30 seconds
+        // Send heartbeat every 10 seconds
         heartbeatInterval = setInterval(() => {
             if (socket.connected && sessionCode) {
                 socket.emit('admin_heartbeat', { sessionCode });
                 console.log('💓 Admin heartbeat sent');
             }
-        }, 30000);
+        }, 10000);
         
-        // Check connection status every 5 seconds
+        // Check connection status every 3 seconds with tighter threshold
         connectionCheckInterval = setInterval(() => {
             const now = Date.now();
             const timeSinceLastHeartbeat = now - lastHeartbeatTime;
             
-            // Consider disconnected if no heartbeat response in 45 seconds
-            if (timeSinceLastHeartbeat > 45000) {
+            // Consider disconnected if no heartbeat response in 25 seconds
+            if (timeSinceLastHeartbeat > 25000) {
                 updateConnectionStatus(false);
             } else {
                 updateConnectionStatus(true);
             }
-        }, 5000);
+        }, 3000);
     }
     
     // Stop heartbeat system
@@ -777,6 +771,8 @@
         }
         
         try {
+            // Emit to server so it can use the latest text immediately without DB
+            socket.emit('prompt_update', { sessionCode, prompt: promptText });
             const response = await fetch(`/api/session/${sessionCode}/prompt`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -1002,10 +998,8 @@
     // Format summary text with proper bullet points and line breaks
     function formatSummaryText(text) {
         if (!text) return '';
-
-        const escaped = escapeHtml(text);
-
-        return escaped
+        
+        return text
             // Replace bullet point markers with HTML
             .replace(/^[-•·*]\s+/gm, '<li>')
             .replace(/^\d+\.\s+/gm, '<li>')
@@ -1213,9 +1207,9 @@
                                                 <span class="text-xs font-medium text-blue-600 bg-blue-100 px-2 py-1 rounded uppercase tracking-wide">Full Conversation</span>
                                                 <span class="ml-2 text-xs text-gray-500">${formatTime(latestTranscript.timestamp)}</span>
                                             </div>
-                                            <div class="text-gray-800 mb-3 leading-relaxed">${escapeHtml(groupData.cumulativeTranscript)}</div>
+                                            <div class="text-gray-800 mb-3 leading-relaxed">${groupData.cumulativeTranscript}</div>
                                             <div class="text-xs text-gray-500 border-t pt-2 mt-2">
-                                                <span class="font-medium">Latest chunk:</span> "${escapeHtml(latestTranscript.text)}"
+                                                <span class="font-medium">Latest chunk:</span> "${latestTranscript.text}"
                                             </div>
                                         </div>
                                     `;
@@ -1227,7 +1221,7 @@
                                                 <span class="text-xs font-medium text-blue-600 bg-blue-100 px-2 py-1 rounded uppercase tracking-wide">Latest Transcript</span>
                                                 <span class="ml-2 text-xs text-gray-500">${latestTranscript.duration ? `${latestTranscript.duration.toFixed(1)}s` : 'Unknown duration'}</span>
                                             </div>
-                                            <div class="text-gray-800 mb-2 font-medium leading-relaxed">${escapeHtml(latestTranscript.text)}</div>
+                                            <div class="text-gray-800 mb-2 font-medium leading-relaxed">${latestTranscript.text}</div>
                                             <div class="flex items-center justify-between text-xs text-gray-500">
                                                 <span>${formatTime(latestTranscript.timestamp)}</span>
                                                 ${latestTranscript.wordCount ? `<span>${latestTranscript.wordCount} words</span>` : ''}
@@ -1243,10 +1237,10 @@
                                         <div class="space-y-2">
                                             ${previousTranscripts.map(transcript => `
                                                 <div class="bg-gray-50 rounded p-3 text-sm">
-                                                    <div class="text-gray-800 mb-1">${escapeHtml(transcript.text)}</div>
+                                                    <div class="text-gray-800 mb-1">${transcript.text}</div>
                                                     <div class="text-xs text-gray-500">
-                                                        ${formatTime(transcript.timestamp)} •
-                                                        ${transcript.wordCount} words •
+                                                        ${formatTime(transcript.timestamp)} • 
+                                                        ${transcript.wordCount} words • 
                                                         ${transcript.duration ? transcript.duration.toFixed(1) + 's' : 'No duration'}
                                                     </div>
                                                 </div>
@@ -1401,6 +1395,79 @@
         
         // Add form submission handler for create prompt modal
         document.getElementById('createPromptForm').addEventListener('submit', handleCreatePromptSubmit);
+
+        // Wire up start/stop recording controls (summary mode)
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const intervalInput = document.getElementById('intervalInput');
+        let startTimer = null;
+
+        startBtn.addEventListener('click', async () => {
+            if (!sessionCode) {
+                console.warn('No sessionCode yet');
+                return;
+            }
+            if (startBtn.disabled) return;
+            try {
+                startBtn.disabled = true;
+                const seconds = parseInt(intervalInput.value) || 30;
+                const intervalMs = seconds * 1000;
+                const res = await fetch(`/api/session/${sessionCode}/start`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ interval: intervalMs })
+                });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                // UI state
+                startBtn.classList.add('opacity-75');
+                stopBtn.disabled = false;
+                intervalInput.disabled = true;
+                recordingStart = Date.now();
+                if (elapsedInterval) clearInterval(elapsedInterval);
+                elapsedInterval = setInterval(() => {
+                    const elapsed = Math.floor((Date.now() - recordingStart) / 1000);
+                    const m = Math.floor(elapsed / 60);
+                    const s = elapsed % 60;
+                    document.getElementById('timeElapsed').textContent = `${m}:${s.toString().padStart(2,'0')}`;
+                }, 1000);
+            } catch (e) {
+                console.error('Failed to start session:', e);
+                startBtn.disabled = false;
+            }
+        });
+
+        stopBtn.addEventListener('click', async () => {
+            if (!sessionCode) return;
+            if (stopBtn.disabled) return;
+            try {
+                stopBtn.disabled = true;
+                const res = await fetch(`/api/session/${sessionCode}/stop`, { method: 'POST' });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                // UI state
+                if (elapsedInterval) { clearInterval(elapsedInterval); elapsedInterval = null; }
+                document.getElementById('timeElapsed').textContent = '0:00';
+                intervalInput.disabled = false;
+                startBtn.disabled = false;
+                startBtn.classList.remove('opacity-75');
+            } catch (e) {
+                console.error('Failed to stop session:', e);
+                stopBtn.disabled = false;
+            }
+        });
+
+        /* ===== DEV ONLY: Button to trigger simulated disconnects for testing =====
+           Usage (in browser console):
+           // All students in this session for 5s
+           socket.emit('dev_simulate_disconnect', { sessionCode, target: 'all', durationMs: 5000 });
+           // Only group 1 for 8s
+           socket.emit('dev_simulate_disconnect', { sessionCode, target: 'group', group: 1, durationMs: 8000 });
+           Requires server env: ALLOW_DEV_TEST=true
+        */
+        window.devSimDisconnectAll = (ms=5000) => socket.emit('dev_simulate_disconnect', { sessionCode, target: 'all', durationMs: ms });
+        window.devSimDisconnectGroup = (grp=1, ms=5000) => socket.emit('dev_simulate_disconnect', { sessionCode, target: 'group', group: grp, durationMs: ms });
+        /* ===== END DEV ONLY ===== */
+
+        // DEV temporary disconnect test removed
     });
     
     // ===================

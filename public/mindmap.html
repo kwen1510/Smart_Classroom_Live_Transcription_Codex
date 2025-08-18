@@ -759,7 +759,7 @@
         let sessionStartTime = null;
         let durationTimer = null;
         let stream = null;
-        let chunkInterval = 10000; // Default 10 seconds
+        let chunkInterval = 20000; // Default 20 seconds
         let recordingTimeout = null;
 
         // Initialize on page load
@@ -782,6 +782,9 @@
             document.getElementById('resetSessionBtn').addEventListener('click', resetSession);
             document.getElementById('saveSessionBtn').addEventListener('click', saveSession);
             document.getElementById('intervalInput').addEventListener('change', updateInterval);
+            // Initialize interval input to default 20s on first load
+            const ii = document.getElementById('intervalInput');
+            if (ii) { ii.value = '20'; updateInterval(); }
         }
 
         function updateInterval() {
@@ -1409,7 +1412,7 @@ The behavioral patterns of cats are equally impressive. They spend approximately
             document.getElementById('startRecordingBtn').classList.remove('hidden');
             document.getElementById('stopRecordingMainBtn').classList.add('hidden');
             document.getElementById('intervalInput').disabled = false;
-            document.getElementById('intervalInput').value = '10';
+            document.getElementById('intervalInput').value = '20';
             updateInterval(); // Update the interval display
             
             // Reset chat

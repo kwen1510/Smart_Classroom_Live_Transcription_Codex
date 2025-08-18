@@ -1,169 +1,25 @@
-# Smart Classroom Live Transcription - Render Deployment
+# Render deployment (minimal)
 
-This is the deployment-ready version of the Smart Classroom Live Transcription system for Render.com.
+This directory contains a minimal setup for deploying the Smart Classroom server on Render.
 
-## 🚀 Quick Deploy to Render
+Files included
+- `index.js`: thin bootstrap that imports the root `index.js`
+- `package.json`: minimal package manifest for Render
+- `render.yaml`: service definition pointing to `render_deploy/index.js`
+- `Procfile`: herokuish process file
 
-### Option 1: Deploy with Render Dashboard (Recommended)
+Deploy
+1. Push this repo to GitHub
+2. In Render, create a Web Service from this repo
+3. Render will read `render_deploy/render.yaml` (auto) or you can set:
+   - Build Command: `npm ci`
+   - Start Command: `node render_deploy/index.js`
+4. Environment variables required at minimum:
+   - `MONGO_URI` (your cluster)
+   - `ANTHROPIC_KEY` (if using Claude; otherwise mock path will run)
+   - `PORT` (optional, defaults to 10000)
+   - `NODE_VERSION=18.20.5`
 
-1. **Fork or clone this repository** to your GitHub account
-2. **Go to [Render Dashboard](https://dashboard.render.com)**
-3. **Click "New +" → "Web Service"**
-4. **Connect your GitHub repository**
-5. **Configure the service:**
-   - **Name**: `smart-classroom-transcription`
-   - **Environment**: `Node`
-   - **Build Command**: `npm install`
-   - **Start Command**: `node index.js`
-   - **Plan**: `Starter` (free tier)
-
-6. **Add Environment Variables:**
-   - `ELEVENLABS_KEY` - Your ElevenLabs API key
-   - `ANTHROPIC_KEY` - Your Anthropic Claude API key
-   - `MONGO_DB_PASSWORD` - Your MongoDB Atlas password
-   - `NODE_ENV` - `production`
-   - `PORT` - `10000` (Render will override this)
-
-7. **Click "Create Web Service"**
-
-### Option 2: Deploy with render.yaml (Blue-Green)
-
-1. **Push this code to GitHub**
-2. **Go to Render Dashboard**
-3. **Click "New +" → "Blueprint"**
-4. **Connect your repository**
-5. **Render will automatically detect the `render.yaml` file**
-6. **Add your API keys in the environment variables section**
-7. **Click "Apply"**
-
-## 🔧 Environment Variables
-
-You need to set these environment variables in your Render dashboard:
-
-| Variable | Description | Required |
-|----------|-------------|----------|
-| `ELEVENLABS_KEY` | Your ElevenLabs API key for transcription | ✅ |
-| `ANTHROPIC_KEY` | Your Anthropic Claude API key for summarization | ✅ |
-| `MONGO_DB_PASSWORD` | Your MongoDB Atlas password | ✅ |
-| `NODE_ENV` | Environment (set to `production`) | ✅ |
-| `PORT` | Port number (Render sets this automatically) | ❌ |
-
-## 📋 Requirements
-
-- **Node.js**: Version 18.20.5 (specified in package.json)
-- **npm**: Latest version
-- **API Keys**: ElevenLabs and Anthropic Claude
-- **MongoDB Atlas**: Cloud database (free tier available)
-
-## 📁 Project Structure
-
-```
-render-deployment/
-├── index.js              # Main server file
-├── package.json          # Dependencies and scripts
-├── render.yaml           # Render configuration
-├── .env                  # Local environment variables (not used in production)
-├── README.md            # This file
-└── public/              # Static files
-    ├── admin.html       # Teacher dashboard
-    ├── student.html     # Student interface
-    ├── test-transcription.html
-    └── ...
-```
-
-## 🌐 Accessing Your App
-
-After deployment, your app will be available at:
-- **Main URL**: `https://your-app-name.onrender.com`
-- **Teacher Dashboard**: `https://your-app-name.onrender.com/admin`
-- **Student Interface**: `https://your-app-name.onrender.com/student`
-- **History Page**: `https://your-app-name.onrender.com/history`
-
-## 💰 Costs
-
-- **Free Tier**: 750 hours/month (enough for most use cases)
-- **Paid Plans**: Start at $7/month for unlimited usage
-- **API Costs**: You pay for ElevenLabs and Anthropic API usage separately
-- **MongoDB Atlas**: Free tier available (512MB storage)
-
-## 🔄 Updates
-
-To update your deployed app:
-1. **Push changes to your GitHub repository**
-2. **Render will automatically redeploy** (if auto-deploy is enabled)
-3. **Or manually trigger a deploy** from the Render dashboard
-
-## 🛠️ Local Development
-
-To run locally before deploying:
-
-```bash
-cd render-deployment
-npm install
-cp .env.example .env  # Create your .env file
-# Edit .env with your API keys and MongoDB password
-npm start
-```
-
-
-## API Endpoints
-
-### Session Management
-- `GET /api/new-session` - create a new session
-- `GET /api/session/:code/status` - get session status
-- `POST /api/session/:code/start` - start recording
-- `POST /api/session/:code/stop` - stop recording
-- `POST /api/session/:code/prompt` - save a custom prompt
-- `GET /api/session/:code/prompt` - load the prompt for a session
-
-### Student Upload
-- `POST /api/transcribe-chunk` - upload a 30s audio chunk
-
-### Data Retrieval
-- `GET /api/transcripts/:code/:number` - transcripts and summary for a group
-- `GET /api/history` - list sessions (use query params for filters)
-- `GET /api/history/session/:code` - detailed session info
-- `DELETE /api/sessions` - delete sessions (provide \`sessionCodes\` array)
-
-### Testing
-- `POST /api/test-transcription` - transcribe an uploaded audio file
-- `POST /api/test-summary` - summarise supplied text
-
-### Web Pages
-- `/admin` teacher dashboard
-- `/admin_static` static admin dashboard
-- `/student` student interface
-- `/history` session history
-- `/test-transcription` demo transcription page
-- `/test-recording` demo recorder page
-## 🐛 Troubleshooting
-
-### Common Issues:
-
-1. **Build fails**: Check that all dependencies are in `package.json`
-2. **App crashes**: Check the logs in Render dashboard
-3. **API errors**: Verify your API keys are set correctly
-4. **Database connection issues**: Verify your MongoDB password is correct
-
-### Logs:
-- **View logs** in the Render dashboard under your service
-- **Real-time logs** are available during deployment
-
-## 📞 Support
-
-If you encounter issues:
-1. **Check Render documentation**: https://render.com/docs
-2. **View application logs** in Render dashboard
-3. **Verify environment variables** are set correctly
-4. **Test locally** first to isolate issues
-
-## 🔒 Security Notes
-
-- **API keys** are stored securely in Render environment variables
-- **MongoDB Atlas** provides persistent cloud storage
-- **HTTPS** is automatically enabled on Render
-- **No sensitive data** should be committed to the repository
-
----
-
-**Happy Teaching! 🎓** 
+Notes
+- The service serves the `public/` directory via the root server.
+- No duplication of assets; this bootstrap simply runs the main server entry. 

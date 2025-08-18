@@ -225,7 +225,7 @@
                     </div>
                 </div>
 
-                <div class="mb-6">
+                <div id="descriptionRow" class="mb-6">
                     <label for="promptDescription" class="block text-sm font-medium text-gray-700 mb-2">Description</label>
                     <textarea 
                         id="promptDescription" 
@@ -266,7 +266,7 @@
                     </div>
                 </div>
 
-                <div class="mb-6">
+                <div id="tagsRow" class="mb-6">
                     <label for="promptTags" class="block text-sm font-medium text-gray-700 mb-2">Tags</label>
                     <input 
                         type="text" 
@@ -284,9 +284,9 @@
                         rows="8"
                         required
                         class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-vertical font-mono text-sm"
-                        placeholder="Enter your AI prompt here. This is the actual text that will be sent to the AI system..."
+                        placeholder="Enter your AI prompt or template. For Checkbox mode: first write the Scenario/Question line, then list each criterion on a new line (optional rubric in parentheses)."
                     ></textarea>
-                    <p class="text-xs text-gray-500 mt-1">Write clear, specific instructions for the AI. Use variables like {transcript} or {topic} where appropriate.</p>
+                    <p id="checkboxExample" class="text-xs text-gray-500 mt-1">Example for Checkbox mode:\nScenario: Interview someone about their interests\nName (Student’s given name)\nHobby (Activity they enjoy)\nFavourite colour (Colour preference)</p>
                 </div>
 
                 <div class="flex items-center justify-between pt-4 border-t border-gray-200">
@@ -364,6 +364,10 @@
             document.getElementById('categoryFilter').addEventListener('change', handleFilterChange);
             document.getElementById('modeFilter').addEventListener('change', handleFilterChange);
             document.getElementById('promptForm').addEventListener('submit', handleFormSubmit);
+
+            // Adapt form for Checkbox schema when mode changes
+            document.getElementById('promptMode').addEventListener('change', adaptFormForMode);
+            adaptFormForMode();
         });
 
         // Debounce function for search
@@ -624,6 +628,15 @@
                 isPublic: document.getElementById('promptVisibility').value === 'true',
                 authorName: document.getElementById('promptAuthor').value
             };
+
+            // Validate checkbox schema with single content field
+            if (formData.mode === 'checkbox') {
+                const lines = formData.content.split('\n').map(l => l.trim()).filter(Boolean);
+                if (lines.length < 2 || !/^scenario\s*:/i.test(lines[0])) {
+                    alert('For Checkbox mode, the first line must start with "Scenario:" followed by at least one criterion line.');
+                    return;
+                }
+            }
             
             try {
                 const url = isEdit ? `/api/prompts/${promptId}` : '/api/prompts';
@@ -649,6 +662,22 @@
             } catch (err) {
                 console.error('❌ Failed to save prompt:', err);
                 showError(`Failed to save prompt: ${err.message}`);
+            }
+        }
+
+        // UI adaptation for mode
+        function adaptFormForMode() {
+            const mode = document.getElementById('promptMode').value;
+            const descriptionRow = document.getElementById('descriptionRow');
+            const tagsRow = document.getElementById('tagsRow');
+            const checkboxExample = document.getElementById('checkboxExample');
+            if (mode === 'checkbox') {
+                // keep a single content field; show example and stricter placeholder
+                document.getElementById('promptContent').placeholder = 'Scenario: ...\nCriterion 1 (optional rubric)\nCriterion 2 (optional rubric)\n...';
+                checkboxExample.classList.remove('hidden');
+            } else {
+                document.getElementById('promptContent').placeholder = 'Enter your AI prompt here. This is the actual text that will be sent to the AI system...';
+                checkboxExample.classList.add('hidden');
             }
         }
 

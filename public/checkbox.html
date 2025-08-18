@@ -700,7 +700,7 @@ Students recognise to stop titration after 2 consistent results (consistent to 0
         // Initialize on page load
         document.addEventListener('DOMContentLoaded', () => {
             lucide.createIcons();
-            loadTestData(); // Load chemistry test data with proper (rubric) format
+            // Do NOT auto-load test data; only use teacher inputs or selected templates
             createSession(); // Create session automatically like admin.html
         });
 
@@ -971,6 +971,20 @@ Students recognise to stop titration after 2 consistent results (consistent to 0
                 console.error('Error saving criteria:', err);
                 showFeedback('Error saving criteria', 'error');
             }
+        }
+
+        // Helper: build payload for fast Anthropic calls
+        function getCurrentCheckboxConfig() {
+            return {
+                scenario: currentScenario || document.getElementById('scenarioInput').value.trim(),
+                criteria: currentCriteria && currentCriteria.length > 0
+                    ? currentCriteria.map(c => ({ description: c.description, rubric: c.rubric || '' }))
+                    : (document.getElementById('criteriaInput').value.trim().split('\n')
+                        .map(line => line.trim()).filter(Boolean).map((line) => {
+                            const m = line.match(/^(.+?)\s*\((.+)\)\s*$/);
+                            return m ? { description: m[1].trim(), rubric: m[2].trim() } : { description: line, rubric: '' };
+                        }))
+            };
         }
 
         // Show feedback message
@@ -1275,6 +1289,32 @@ Students recognise to stop titration after 2 consistent results (consistent to 0
                 });
         });
 
+        // ===== Heartbeat support (admin-side for checkbox dashboard) =====
+        function startHeartbeat() {
+            // Send heartbeat every 10 seconds
+            heartbeatInterval = setInterval(() => {
+                if (socket.connected && sessionCode) {
+                    socket.emit('admin_heartbeat', { sessionCode });
+                    console.log('💓 Admin heartbeat sent (checkbox)');
+                }
+            }, 10000);
+            
+            // Check connection status every 3 seconds with 25s tolerance
+            connectionCheckInterval = setInterval(() => {
+                const now = Date.now();
+                const timeSinceLastHeartbeat = now - lastHeartbeatTime;
+                if (timeSinceLastHeartbeat > 25000) {
+                    updateConnectionStatus(false);
+                } else {
+                    updateConnectionStatus(true);
+                }
+            }, 3000);
+        }
+        // Start heartbeats on load
+        document.addEventListener('DOMContentLoaded', () => {
+            startHeartbeat();
+        });
+
         // Listen for checklist state updates (includes real-time progress)
         socket.on('checklist_state', (data) => {
             console.log('📋 Received checklist state update for group', data.groupNumber);
@@ -1387,46 +1427,15 @@ Students recognise to stop titration after 2 consistent results (consistent to 0
             try {
                 console.log('🎬 Start Recording button clicked');
                 
-                // Step 1: Ensure criteria are loaded
-                showFeedback('📋 Loading criteria...', 'info');
+                // Step 1: Ensure criteria are loaded, but don't block recording start
+                showFeedback('📋 Preparing criteria...', 'info');
                 if (currentCriteria.length === 0) {
-                    console.log('📋 No criteria found, loading test data...');
-                    loadTestData();
-                    setupHardcodedCriteria();
-                }
-
-                if (currentCriteria.length === 0) {
-                    throw new Error('No criteria available. Please set up criteria first or refresh the page.');
-                }
-
-                console.log('📋 Using criteria:', currentCriteria.length, 'items');
-
-                // Step 2: Save criteria only if not already saved this session
-                if (!criteriaSavedOnce) {
-                    showFeedback('💾 Saving criteria to backend...', 'info');
-                    console.log('💾 Saving criteria to backend...');
-                    const criteriaResponse = await fetch('/api/checkbox/session', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            sessionCode: sessionCode,
-                            criteria: currentCriteria,
-                            scenario: currentScenario || "Chemistry discussion session",
-                            interval: parseInt(intervalInput.value) * 1000
-                        })
-                    });
-                    if (!criteriaResponse.ok) {
-                        const errorData = await criteriaResponse.json();
-                        console.warn('⚠️ Criteria save response:', errorData);
-                        // Continue anyway - might be duplicate key error which is OK
-                    } else {
-                        criteriaSavedOnce = true;
-                    }
+                    console.log('📋 No criteria found. Will start recording immediately and save criteria when available.');
                 } else {
-                    console.log('✅ Criteria already saved for this session - skipping save');
+                    console.log('📋 Using criteria:', currentCriteria.length, 'items');
                 }
 
-                // Step 3: Start the recording session
+                // Step 2: Start the recording session IMMEDIATELY (no waiting on criteria save)
                 showFeedback('▶️ Starting recording session...', 'info');
                 console.log('▶️ Starting recording session...');
                 const intervalSeconds = parseInt(intervalInput.value) || 30;
@@ -1472,6 +1481,35 @@ Students recognise to stop titration after 2 consistent results (consistent to 0
                 isRecording = true;
                 showFeedback(`✅ Recording started! Session: ${sessionCode} | ${currentCriteria.length} criteria active | Students can now join and discuss.`, 'success');
                 
+                // Step 3: Save criteria IN THE BACKGROUND so start feels instant
+                if (!criteriaSavedOnce && currentCriteria.length > 0) {
+                    (async () => {
+                        try {
+                            console.log('💾 Saving criteria to backend (background)...');
+                            const bgRes = await fetch('/api/checkbox/session', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    sessionCode: sessionCode,
+                                    criteria: currentCriteria,
+                                    scenario: currentScenario || 'Chemistry discussion session',
+                                    interval: intervalMs,
+                                    strictness: currentStrictness
+                                })
+                            });
+                            if (bgRes.ok) {
+                                criteriaSavedOnce = true;
+                                console.log('✅ Criteria saved (background)');
+                            } else {
+                                const text = await bgRes.text();
+                                console.warn('⚠️ Criteria save failed (background):', text);
+                            }
+                        } catch (e) {
+                            console.warn('⚠️ Criteria background save error:', e);
+                        }
+                    })();
+                }
+
                 // Re-create icons after updating button HTML
                 lucide.createIcons();
                 
@@ -1904,7 +1942,8 @@ Students recognise to stop titration after 2 consistent results (consistent to 0
             const promptsHtml = prompts.map(prompt => {
                 // Parse the prompt content to get scenario and criteria
                 const lines = prompt.content.split('\n').filter(line => line.trim());
-                const criteriaCount = lines.length;
+                const isScenarioHeader = lines.length > 0 && /^\s*scenario\s*:/i.test(lines[0]);
+                const criteriaCount = isScenarioHeader ? Math.max(0, lines.length - 1) : lines.length;
                 
                     return `
                     <div class="bg-gray-50 rounded-lg p-3 hover:bg-gray-100 transition-colors cursor-pointer border border-gray-200" onclick="loadCheckboxPrompt('${prompt._id}')">
@@ -1977,16 +2016,20 @@ Students recognise to stop titration after 2 consistent results (consistent to 0
                 // Parse the content to separate scenario and criteria
                 const lines = prompt.content.split('\n').filter(line => line.trim());
                 
-                // Check if the prompt has a custom scenario format
+                // Extract scenario from first line if formatted as "Scenario: ..."
                 let scenario = '';
                 let criteria = [];
-                
-                if (prompt.scenario) {
-                    scenario = prompt.scenario;
-                    criteria = lines;
+                if (lines.length > 0 && /^\s*scenario\s*:/i.test(lines[0])) {
+                    scenario = lines[0].replace(/^\s*scenario\s*:\s*/i, '').trim();
+                    criteria = lines.slice(1);
                 } else {
-                    // Legacy format - just criteria
-                    criteria = lines;
+                    // Fallbacks
+                    if (prompt.scenario && typeof prompt.scenario === 'string') {
+                        scenario = prompt.scenario.trim();
+                        criteria = lines;
+                    } else {
+                        criteria = lines; // legacy prompts: all lines are criteria
+                    }
                 }
                 
                 // Load into the form

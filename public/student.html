@@ -240,12 +240,6 @@
             document.getElementById('joinSessionForm').dispatchEvent(new Event('submit'));
         }
 
-        function escapeHtml(text) {
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
-        }
-
         function resetView() {
             document.getElementById('latestTranscript').innerHTML = '';
             document.getElementById('olderTranscripts').innerHTML = '';
@@ -287,26 +281,26 @@
         
         // Start heartbeat system
         function startHeartbeat() {
-            // Send heartbeat every 30 seconds
+            // Send heartbeat every 10 seconds (more robust)
             heartbeatInterval = setInterval(() => {
                 if (socket.connected && currentSession && currentGroup) {
                     socket.emit('heartbeat', { session: currentSession, group: currentGroup });
                     console.log('💓 Student heartbeat sent');
                 }
-            }, 30000);
+            }, 10000);
             
-            // Check connection status every 5 seconds
+            // Check connection status every 3 seconds with tighter threshold
             connectionCheckInterval = setInterval(() => {
                 const now = Date.now();
                 const timeSinceLastHeartbeat = now - lastHeartbeatTime;
                 
-                // Consider disconnected if no heartbeat response in 45 seconds
-                if (timeSinceLastHeartbeat > 45000) {
+                // Consider disconnected if no heartbeat response in 20 seconds
+                if (timeSinceLastHeartbeat > 20000) {
                     updateConnectionStatus(false);
                 } else {
                     updateConnectionStatus(true);
                 }
-            }, 5000);
+            }, 3000);
         }
         
         // Stop heartbeat system
@@ -378,7 +372,9 @@
                 if (currentSession && socket.connected) {
                     socket.emit('heartbeat', { session: currentSession, group: currentGroup });
                 }
-            }, 30000); // Send heartbeat every 30 seconds
+            }, 10000); // DEV: 10s (keepalive)
+
+            // DEV temporary disconnect test removed
         }
 
         async function startRecording() {
@@ -437,6 +433,15 @@
                         uploadChunk(event.data);
                     }
                 };
+                
+                // Emit explicit ack when recorder actually starts
+                const session = document.getElementById('activeSession').textContent || currentSession;
+                const group = parseInt(document.getElementById('activeGroup').textContent || currentGroup);
+                setTimeout(() => {
+                    if (socket && socket.connected && session && group && mediaRecorder && mediaRecorder.state === 'recording') {
+                        socket.emit('recording_started', { session, group, interval: chunkInterval });
+                    }
+                }, 200); // small delay to ensure state
                 
                 mediaRecorder.onerror = (event) => {
                     console.error("❌ MediaRecorder error:", event.error);
@@ -587,7 +592,7 @@
                     </div>
                     <div class="ml-3">
                         <h3 class="text-sm font-medium text-red-800">Upload Error</h3>
-                        <p class="mt-1 text-sm text-red-600">${escapeHtml(message)}</p>
+                        <p class="mt-1 text-sm text-red-600">${message}</p>
                         <p class="mt-1 text-xs text-red-500">The recording will continue. This chunk will be skipped.</p>
                     </div>
                     <div class="ml-auto pl-3">
@@ -750,10 +755,10 @@
                     <span class="ml-2 text-xs text-gray-500">${new Date().toLocaleTimeString()}</span>
                 </div>
                 <div class="transcript-content mb-3">
-                    <div class="text-gray-800 leading-relaxed">${escapeHtml(cumulativeText || text)}</div>
+                    <div class="text-gray-800 leading-relaxed">${cumulativeText || text}</div>
                 </div>
                 <div class="text-xs text-gray-500 border-t pt-2 mt-2">
-                    <span class="font-medium">Latest chunk:</span> "${escapeHtml(text)}"
+                    <span class="font-medium">Latest chunk:</span> "${text}"
                 </div>
             `;
             
@@ -770,7 +775,7 @@
             summaryArea.innerHTML = `
                 <div class="bg-gradient-to-r from-purple-50 to-indigo-50 rounded-lg p-6 border-l-4 border-purple-400 h-full">
                     <div class="prose prose-purple max-w-none">
-                        <div class="text-gray-800 leading-relaxed whitespace-pre-line">${escapeHtml(summary)}</div>
+                        <div class="text-gray-800 leading-relaxed whitespace-pre-line">${summary}</div>
                     </div>
                 </div>
             `;
@@ -903,6 +908,27 @@
                 });
             }
         });
+
+        /* ===== DEV ONLY: Client hook for server-driven disconnect test =====
+           The server can emit 'dev_simulate_disconnect' (when ALLOW_DEV_TEST is set)
+           to ask the client to disconnect for a short time, then reconnect.
+        */
+        socket.on('dev_simulate_disconnect', ({ durationMs = 5000 } = {}) => {
+            console.warn(`[DEV] Student simulating disconnect for ${durationMs}ms...`);
+            try {
+                socket.disconnect();
+                setTimeout(() => {
+                    console.warn('[DEV] Student reconnecting...');
+                    socket.connect();
+                    if (currentSession && currentGroup) {
+                        socket.emit('join', { code: currentSession, group: parseInt(currentGroup) });
+                    }
+                }, Number(durationMs) || 5000);
+            } catch (e) {
+                console.error('[DEV] Simulated disconnect error:', e);
+            }
+        });
+        /* ===== END DEV ONLY ===== */
 
         // Handle heartbeat responses (keep connection alive)
         socket.on('heartbeat_ack', () => {
