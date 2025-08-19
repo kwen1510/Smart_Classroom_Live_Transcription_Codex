@@ -477,12 +477,6 @@ Students recognise to stop titration after 2 consistent results (consistent to 0
                         <div class="flex items-center justify-between">
                             <div class="flex items-center space-x-4">
                                 <button 
-                                    onclick="loadTestData()"
-                                    class="text-orange-600 hover:text-orange-800 text-sm font-medium transition-colors"
-                                >
-                                    📋 Load Sample Data
-                                </button>
-                                <button 
                                     onclick="clearCriteria()"
                                     class="text-gray-600 hover:text-gray-800 text-sm font-medium transition-colors"
                                 >
@@ -490,18 +484,6 @@ Students recognise to stop titration after 2 consistent results (consistent to 0
                                 </button>
                             </div>
                             <div class="flex space-x-3">
-                                <button id="testBtn" class="bg-purple-500 hover:bg-purple-600 text-white px-3 py-2 rounded-lg font-medium transition-colors flex items-center text-sm">
-                                    <i data-lucide="flask" class="w-4 h-4 mr-2"></i>
-                                    <span>🧪 Test Mode</span>
-                                </button>
-                                <button onclick="testTranscriptModal()" class="bg-blue-500 hover:bg-blue-600 text-white px-3 py-2 rounded-lg font-medium transition-colors flex items-center text-sm">
-                                    <i data-lucide="eye" class="w-4 h-4 mr-2"></i>
-                                    <span>📄 Test Modal</span>
-                                </button>
-                                <button onclick="testModalDirect()" class="bg-red-500 hover:bg-red-600 text-white px-3 py-2 rounded-lg font-medium transition-colors flex items-center text-sm">
-                                    <i data-lucide="zap" class="w-4 h-4 mr-2"></i>
-                                    <span>🔬 Direct Test</span>
-                                </button>
                                 <button
                                     onclick="saveCriteria()"
                                     class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg font-medium transition-colors"
@@ -548,7 +530,7 @@ Students recognise to stop titration after 2 consistent results (consistent to 0
                     <i data-lucide="x" class="w-6 h-6"></i>
                 </button>
             </div>
-            <form id="createCheckboxPromptForm" class="p-6 overflow-y-auto max-h-[75vh]">
+            <form id="createCheckboxPromptForm" class="p-6 overflow-y-auto max-h-[75vh]" onsubmit="return handleCreateCheckboxPromptSubmit(event)">
                 <input type="hidden" id="editCheckboxPromptId" value="">
                 
                 <div class="grid grid-cols-2 gap-4 mb-4">
@@ -718,16 +700,7 @@ Students recognise to stop titration after 2 consistent results (consistent to 0
                 groups.clear();
                 currentCriteria = [];
                 currentScenario = "";
-                
-                // Automatically set up hardcoded criteria
-                setupHardcodedCriteria();
-                
-                // Save criteria to backend if we have them
-                if (currentCriteria.length > 0) {
-                    console.log('📋 Auto-saving criteria to backend...');
-                    await saveCriteriaToBackend();
-                }
-                
+
                 // Load existing session data if available
                 await loadExistingSessionData();
             } catch (err) {
@@ -812,68 +785,9 @@ Students recognise to stop titration after 2 consistent results (consistent to 0
             }
         }
 
-        // Setup hardcoded criteria automatically  
-        function setupHardcodedCriteria() {
-            const scenario = document.getElementById('scenarioInput').value.trim();
-            const criteriaText = document.getElementById('criteriaInput').value.trim();
-            
-            if (criteriaText) {
-                // Parse criteria with rubrics in parentheses format: "Description (Rubric)"
-                const criteriaLines = criteriaText.split('\n')
-                    .map(line => line.trim())
-                    .filter(line => line.length > 0);
+        // Removed setupHardcodedCriteria (no test utilities in production)
 
-                currentCriteria = criteriaLines.map((line, index) => {
-                    const trimmedLine = line.trim();
-                    
-                    // Extract description and rubric using regex
-                    const match = trimmedLine.match(/^(.+?)\s*\((.+)\)\s*$/);
-                    
-                    if (match) {
-                        // Format: "Description (Rubric)"
-                        return {
-                    id: index,
-                            description: match[1].trim(),
-                            rubric: match[2].trim(),
-                            completed: false,
-                            quote: null,
-                            status: 'grey'
-                        };
-                    } else {
-                        // Fallback: treat entire line as description
-                        return {
-                            id: index,
-                            description: trimmedLine,
-                            rubric: "No specific rubric provided",
-                            completed: false,
-                            quote: null,
-                            status: 'grey'
-                        };
-                    }
-                });
-                currentScenario = scenario;
-                
-                console.log('📋 Hardcoded criteria ready:', currentCriteria.length, 'items with rubrics');
-            }
-        }
-
-        // Load test data for quick setup
-        function loadTestData() {
-            const testCriteria = `Students explain that back titration is used (CaCO3 is not soluble in water and cannot be titrated directly)
-Students identify that CaCO3 reacts with known volume of excess HCl (the volume of HCl used must be calculated to ensure that the titre volume is between 20 to 25 cm3)
-Students identify the need to weigh by difference (there will be some CaCO3 left, so the weighing bottle must be reweighed)
-Students recognise the need to cover the conical flask with a filter funnel (there is acid spray from the reaction between CaCO3 and HCl, cover to minimise loss of HCl)
-Students understand that HCl must be diluted before titrating against NaOH (if not the titre volume will be more than 50 cm3, no longer between 20 to 25 cm3)
-Students should choose the appropriate indicator (methyl orange or thymolphthalein)
-Students recognise to stop titration after 2 consistent results (consistent to 0.10 cm3)`;
-            
-            const testScenario = "Chemistry Lab: Back Titration Analysis\nStudents are conducting a back titration experiment to determine the purity of calcium carbonate in an impure sample. They need to demonstrate understanding of the experimental procedure, safety considerations, and analytical techniques involved in this quantitative analysis method.";
-            
-            document.getElementById('criteriaInput').value = testCriteria;
-            document.getElementById('scenarioInput').value = testScenario;
-            
-            console.log('📋 Loaded chemistry back titration test data');
-        }
+        // (Test data loader removed for production)
 
         // Toggle criteria editor
         function toggleCriteriaEditor() {
@@ -1007,6 +921,11 @@ Students recognise to stop titration after 2 consistent results (consistent to 0
             }
         }
 
+        // Alias used by the prompt modal flows
+        function showCriteriaFeedback(message, type) {
+            return showFeedback(message, type);
+        }
+
         // Show error message
         function showError(message) {
             showFeedback(message, 'error');
@@ -1058,10 +977,7 @@ Students recognise to stop titration after 2 consistent results (consistent to 0
                         wordCount: data.transcriptWordCount || 0
                     });
                     
-                    // Keep reasonable number of transcripts (last 20)
-                    if (groupData.transcripts.length > 20) {
-                        groupData.transcripts = groupData.transcripts.slice(-20);
-                    }
+                    // Do not trim; keep full history so "Show All" truly shows all
                     
                 console.log('📚 Group', groupNumber, 'now has', groupData.transcripts.length, 'transcript segments');
             } else {
@@ -1103,7 +1019,7 @@ Students recognise to stop titration after 2 consistent results (consistent to 0
             
             // Assign rebuilt, ordered, de-duplicated list
             groupData.checkboxes = (groupData.checkboxes || []).slice().sort((a, b) => Number(a.id) - Number(b.id));
-            groups.set(data.groupNumber, groupData);
+            groups.set(groupNumber, groupData);
             
             // Update UI
             const completedCount = groupData.checkboxes.filter(c => c.completed).length;
@@ -1222,23 +1138,15 @@ Students recognise to stop titration after 2 consistent results (consistent to 0
                                     </div>
                                 </div>
                                 
-                                <!-- All transcripts (collapsible) -->
-                                <div id="allTranscripts-${groupNumber}" class="hidden space-y-2">
-                                    ${groupData.transcripts.slice(0, -1).reverse().map((transcript, index) => `
-                                        <div class="text-sm bg-gray-50 border border-gray-200 rounded-lg p-3">
-                                            <div class="flex items-center justify-between mb-2">
-                                                <span class="text-xs font-medium text-gray-600">
-                                                    ${new Date(transcript.timestamp).toLocaleTimeString()}
-                                                </span>
-                                                <span class="text-xs text-gray-500">
-                                                    Segment ${groupData.transcripts.length - 1 - index}
-                                                </span>
-                                            </div>
-                                            <div class="text-gray-800 whitespace-pre-wrap break-words">
-                                                ${transcript.text}
-                                            </div>
+                                <!-- Full transcript (collapsible, concatenated) -->
+                                <div id="allTranscripts-${groupNumber}" class="hidden">
+                                    <div class="text-sm bg-gray-50 border border-gray-200 rounded-lg p-3">
+                                        <div class="flex items-center justify-between mb-2">
+                                            <span class="text-xs font-medium text-gray-600">Full Transcript</span>
+                                            <span class="text-xs text-gray-500">${groupData.transcripts.length} segments combined</span>
                                         </div>
-                                    `).join('')}
+                                        <div class="text-gray-800 whitespace-pre-wrap break-words">${groupData.transcripts.map(t => t.text).join(' ')}</div>
+                                    </div>
                                 </div>
                             </div>
                         ` : ''}
@@ -1290,6 +1198,9 @@ Students recognise to stop titration after 2 consistent results (consistent to 0
         });
 
         // ===== Heartbeat support (admin-side for checkbox dashboard) =====
+        let heartbeatInterval = null;
+        let connectionCheckInterval = null;
+        let lastHeartbeatTime = Date.now();
         function startHeartbeat() {
             // Send heartbeat every 10 seconds
             heartbeatInterval = setInterval(() => {
@@ -1303,13 +1214,29 @@ Students recognise to stop titration after 2 consistent results (consistent to 0
             connectionCheckInterval = setInterval(() => {
                 const now = Date.now();
                 const timeSinceLastHeartbeat = now - lastHeartbeatTime;
-                if (timeSinceLastHeartbeat > 25000) {
-                    updateConnectionStatus(false);
-                } else {
-                    updateConnectionStatus(true);
-                }
+                const connected = timeSinceLastHeartbeat <= 25000;
+                updateConnectionStatus(connected);
             }, 3000);
         }
+        // Minimal connection status updater for checkbox header
+        function updateConnectionStatus(connected) {
+            const dot = document.getElementById('connectionDot');
+            const text = document.getElementById('connectionText');
+            if (!dot || !text) return;
+            if (connected) {
+                dot.classList.remove('bg-red-500');
+                dot.classList.add('bg-green-500');
+                text.textContent = 'Connected';
+            } else {
+                dot.classList.remove('bg-green-500');
+                dot.classList.add('bg-red-500');
+                text.textContent = 'Disconnected';
+            }
+        }
+        // Track heartbeat acks
+        socket.on('admin_heartbeat_ack', () => {
+            lastHeartbeatTime = Date.now();
+        });
         // Start heartbeats on load
         document.addEventListener('DOMContentLoaded', () => {
             startHeartbeat();
@@ -1358,7 +1285,7 @@ Students recognise to stop titration after 2 consistent results (consistent to 0
             
             // Assign rebuilt, ordered, de-duplicated list
             groupData.checkboxes = merged.sort((a, b) => Number(a.id) - Number(b.id));
-            groups.set(data.groupNumber, groupData);
+            groups.set(data.groupNumber ?? groupNumber, groupData);
             
             // Re-render the group display with the merged data
             updateGroup(data.groupNumber, {
@@ -1405,11 +1332,42 @@ Students recognise to stop titration after 2 consistent results (consistent to 0
             const startBtn = document.getElementById('startBtn');
             const stopBtn = document.getElementById('stopBtn');
             const intervalInput = document.getElementById('intervalInput');
+            const scenarioEl = document.getElementById('scenarioInput');
+            const criteriaEl = document.getElementById('criteriaInput');
             
             // Prevent multiple clicks
             if (startBtn.disabled || isRecording) {
                 console.log('🚫 Start button already processing or recording active');
                 return;
+            }
+
+            // Validate scenario and criteria presence before starting
+            const scenarioText = (scenarioEl?.value || '').trim();
+            const criteriaLines = (criteriaEl?.value || '').split('\n').map(l => l.trim()).filter(Boolean);
+            let missing = [];
+            if (!scenarioText) missing.push('scenario');
+            if (criteriaLines.length === 0) missing.push('at least one criterion');
+            if (missing.length > 0) {
+                // Expand criteria editor for the user
+                const editor = document.getElementById('criteriaEditor');
+                const chevron = document.getElementById('criteriaChevron');
+                if (editor && editor.classList.contains('hidden')) {
+                    editor.classList.remove('hidden');
+                    if (chevron) chevron.classList.add('rotate-180');
+                }
+                // Highlight missing fields
+                if (!scenarioText && scenarioEl) scenarioEl.classList.add('ring-2','ring-red-400','border-red-400');
+                if (criteriaLines.length === 0 && criteriaEl) criteriaEl.classList.add('ring-2','ring-red-400','border-red-400');
+                showFeedback(`Please set the ${missing.join(' and ')} before starting. You can type them or pick a prompt from the library.`, 'error');
+                return;
+            }
+            // Clear any previous highlight
+            scenarioEl?.classList.remove('ring-2','ring-red-400','border-red-400');
+            criteriaEl?.classList.remove('ring-2','ring-red-400','border-red-400');
+            
+            // Ensure in-memory structures are populated from current inputs
+            if (currentCriteria.length === 0 || currentScenario !== scenarioText) {
+                updateCriteria();
             }
             
             // Immediate UI feedback - disable button and show loading
@@ -1612,219 +1570,7 @@ Students recognise to stop titration after 2 consistent results (consistent to 0
             }
         });
 
-        // Direct modal test function - bypasses all data checks
-        window.testModalDirect = function() {
-            console.log('🔬 Direct modal test - bypassing all data checks');
-            
-            const modalEl = document.getElementById('transcriptModal');
-            const groupNumEl = document.getElementById('modalGroupNumber');
-            const countEl = document.getElementById('modalTranscriptCount');
-            const contentEl = document.getElementById('modalTranscriptContent');
-            
-            if (!modalEl) {
-                console.error('❌ transcriptModal element not found');
-                alert('ERROR: transcriptModal element not found');
-                return;
-            }
-            
-            if (!groupNumEl) {
-                console.error('❌ modalGroupNumber element not found');
-                alert('ERROR: modalGroupNumber element not found');
-                return;
-            }
-            
-            if (!countEl) {
-                console.error('❌ modalTranscriptCount element not found');
-                alert('ERROR: modalTranscriptCount element not found');
-                return;
-            }
-            
-            if (!contentEl) {
-                console.error('❌ modalTranscriptContent element not found');
-                alert('ERROR: modalTranscriptContent element not found');
-                return;
-            }
-            
-            // Set test content directly
-            groupNumEl.textContent = '1';
-            countEl.textContent = '3';
-            contentEl.innerHTML = `
-                <div class="border border-gray-200 rounded-lg p-4">
-                    <div class="flex items-center justify-between mb-2">
-                        <span class="text-sm font-medium text-gray-700">Segment 1</span>
-                        <span class="text-xs text-gray-500">10:30:15</span>
-                    </div>
-                    <div class="text-sm text-gray-900 leading-relaxed">
-                        Test transcript segment 1 - This is a test to see if the modal opens correctly.
-                    </div>
-                </div>
-                <div class="border border-gray-200 rounded-lg p-4">
-                    <div class="flex items-center justify-between mb-2">
-                        <span class="text-sm font-medium text-gray-700">Segment 2</span>
-                        <span class="text-xs text-gray-500">10:31:20</span>
-                    </div>
-                    <div class="text-sm text-gray-900 leading-relaxed">
-                        Test transcript segment 2 - This should appear in the modal if it's working.
-                    </div>
-                </div>
-                <div class="border border-gray-200 rounded-lg p-4">
-                    <div class="flex items-center justify-between mb-2">
-                        <span class="text-sm font-medium text-gray-700">Segment 3</span>
-                        <span class="text-xs text-gray-500">10:32:25</span>
-                    </div>
-                    <div class="text-sm text-gray-900 leading-relaxed">
-                        Test transcript segment 3 - If you can see this, the modal is working!
-                    </div>
-                </div>
-            `;
-            
-            console.log('✅ All modal elements found, attempting to show modal');
-            modalEl.classList.remove('hidden');
-            console.log('✅ Modal should now be visible');
-            
-            // Test if modal is actually visible
-            const isVisible = !modalEl.classList.contains('hidden');
-            console.log('🔍 Modal visibility check:', isVisible);
-            
-            if (isVisible) {
-                alert('SUCCESS: Modal opened successfully! You should see the transcript modal.');
-            } else {
-                alert('ERROR: Modal should be visible but might not be showing up.');
-            }
-        };
-
-        // Test function to verify transcript modal functionality
-        window.testTranscriptModal = function() {
-            console.log('🧪 Testing transcript modal functionality...');
-            
-            // Create mock transcript data for Group 1
-            const testTranscripts = [
-                {
-                    text: "Students explain that back titration is used because CaCO₃ is not soluble in water and cannot be titrated directly.",
-                    timestamp: Date.now() - 300000 // 5 minutes ago
-                },
-                {
-                    text: "Right, CaCO₃ reacts with HCl to form salt, water, and carbon dioxide. You can see the effervescence from the CO₂ being released.",
-                    timestamp: Date.now() - 240000 // 4 minutes ago
-                },
-                {
-                    text: "We should use a weighing bottle and analytical balance for accuracy. Yes, and we use the weighing by difference technique.",
-                    timestamp: Date.now() - 180000 // 3 minutes ago
-                },
-                {
-                    text: "For the titration part, we want our titre volume to be between 20 and 25 cm³ to minimize percentage error.",
-                    timestamp: Date.now() - 120000 // 2 minutes ago
-                },
-                {
-                    text: "We'll use methyl orange as our indicator. Methyl orange changes from red to orange at the endpoint.",
-                    timestamp: Date.now() - 60000 // 1 minute ago
-                }
-            ];
-            
-            // Ensure Group 1 exists
-            if (!groups.has(1)) {
-                updateGroup(1, { isActive: true });
-            }
-            
-            // Add test transcripts to Group 1
-            const groupData = groups.get(1);
-            groupData.transcripts = testTranscripts;
-            groups.set(1, groupData);
-            
-            // Update the UI to show the group
-            updateGroup(1, { 
-                isActive: true,
-                latestTranscript: testTranscripts[testTranscripts.length - 1].text
-            });
-            
-            console.log('✅ Added', testTranscripts.length, 'test transcripts to Group 1');
-            showFeedback(`✅ Test data added! Group 1 now has ${testTranscripts.length} transcript segments. Try the "View Full Transcript" button.`, 'success');
-        };
-
-        // Test button functionality
-        document.getElementById('testBtn').addEventListener('click', async () => {
-            try {
-                const testTranscript = `So for this back titration, we need to understand why we can't just titrate calcium carbonate directly, right? Yeah, that's because CaCO₃ is not soluble in water. You can't titrate something that doesn't dissolve properly. Exactly! Direct titration is not suitable for insoluble solids like calcium carbonate. That's why we need to use back titration. So we add hydrochloric acid to react with the CaCO₃ first? Right, CaCO₃ reacts with HCl to form salt, water, and carbon dioxide. You can see the effervescence from the CO₂ being released. And we need to add excess HCl to make sure all the calcium carbonate reacts completely. Then we use NaOH to determine how much unreacted HCl is left. I remember we need to be careful with the weighing. We should use a weighing bottle and analytical balance for accuracy. Yes, and we use the weighing by difference technique—weigh the full bottle first, then weigh it again after transferring some powder. Some residue always remains. For the titration part, we want our titre volume to be between 20 and 25 cm³ to minimize percentage error. And we'll use methyl orange as our indicator. Methyl orange changes from red to orange at the endpoint, right? We stop when we get consistent titres with a permanent colour change. Don't forget we need to dilute the solution before titration because the HCl is more concentrated than the NaOH we're using.`;
-                
-                console.log('🧪 Starting test mode...');
-                
-                // First ensure we have criteria saved
-                if (currentCriteria.length === 0) {
-                    setupHardcodedCriteria();
-                }
-                
-                if (currentCriteria.length === 0) {
-                    showError('No criteria available. Please refresh the page.');
-                    return;
-                }
-                
-                // Save criteria to backend if not already done
-                console.log('🧪 Saving criteria for test...');
-                const criteriaResponse = await fetch('/api/checkbox/session', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        sessionCode: sessionCode,
-                        scenario: currentScenario,
-                        criteria: currentCriteria,
-                        interval: 30000
-                    })
-                });
-                
-                if (!criteriaResponse.ok) {
-                    const errorData = await criteriaResponse.json();
-                    console.warn('🧪 Criteria save warning (may be duplicate):', errorData.error);
-                    // Continue anyway - might be duplicate key error which is OK
-                }
-                
-                // Create a test group if it doesn't exist
-                if (!groups.has(1)) {
-                    updateGroup(1, { isActive: true });
-                }
-                
-                // Process the test transcript using dedicated test endpoint
-                console.log('🧪 Processing test transcript...');
-                const processResponse = await fetch('/api/checkbox/test', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        sessionCode: sessionCode,
-                        transcript: testTranscript
-                    })
-                });
-                
-                if (!processResponse.ok) {
-                    const errorText = await processResponse.text();
-                    throw new Error(`HTTP ${processResponse.status}: ${errorText}`);
-                }
-                
-                const result = await processResponse.json();
-                console.log('🧪 Test result:', result);
-                
-                // Ensure result.matches is always an array
-                const matches = Array.isArray(result.matches) ? result.matches : [];
-                console.log('🧪 Matches found:', matches.length);
-                
-                // Update the group with the test results
-                const checkboxUpdates = matches.map(match => ({
-                    criteriaId: match.criteria_index,
-                    completed: true,
-                    quote: match.quote
-                }));
-                
-                updateGroup(1, {
-                    latestTranscript: testTranscript,
-                    checkboxUpdates: checkboxUpdates,
-                    isActive: true
-                });
-                
-                showFeedback(`🧪 Test completed! ${matches.length} criteria matched from ${currentCriteria.length} total.`, 'success');
-                
-            } catch (err) {
-                console.error('🧪 Test failed:', err);
-                showError(`Test failed: ${err.message}`);
-            }
-        });
+        
 
         // Toggle transcripts display (replaces modal)
         function toggleTranscripts(groupNumber) {
@@ -1853,9 +1599,25 @@ Students recognise to stop titration after 2 consistent results (consistent to 0
             }
         }
 
-        // Initialize checkbox prompt library on page load
+        // Initialize checkbox prompt library on page load with timeout fallback
         document.addEventListener('DOMContentLoaded', () => {
-            loadCheckboxPromptLibrary();
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 6000);
+            (async () => {
+                try {
+                    await loadCheckboxPromptLibrary(controller.signal);
+                } catch (e) {
+                    document.getElementById('checkboxPromptLibraryGrid').innerHTML = `
+                        <div class="flex items-center justify-center py-8 text-red-500 text-sm col-span-full">
+                            <i data-lucide="alert-circle" class="w-4 h-4 mr-2"></i>
+                            Failed to load prompts: ${e.name === 'AbortError' ? 'Request timed out' : e.message}
+                            <button class="ml-3 underline" onclick="refreshCheckboxPrompts()">Retry</button>
+                        </div>`;
+                    lucide.createIcons();
+                } finally {
+                    clearTimeout(timeout);
+                }
+            })();
         });
         
         // ===================
@@ -1866,14 +1628,14 @@ Students recognise to stop titration after 2 consistent results (consistent to 0
         let availableCheckboxCategories = [];
         
         // Load checkbox prompt library from API
-        async function loadCheckboxPromptLibrary() {
+        async function loadCheckboxPromptLibrary(signal) {
             try {
-                const response = await fetch('/api/prompts?mode=checkbox&limit=50');
+                const response = await fetch('/api/prompts?mode=checkbox&limit=50', { signal });
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 
                 const data = await response.json();
-                currentCheckboxPrompts = data.prompts;
-                availableCheckboxCategories = data.filters.categories;
+                currentCheckboxPrompts = Array.isArray(data.prompts) ? data.prompts : [];
+                availableCheckboxCategories = Array.isArray(data?.filters?.categories) ? data.filters.categories : [];
                 
                 updateCheckboxCategoryFilter();
                 displayCheckboxPromptLibrary(data.prompts);
@@ -1884,6 +1646,7 @@ Students recognise to stop titration after 2 consistent results (consistent to 0
                     <div class="flex items-center justify-center py-8 text-red-500 text-sm col-span-full">
                         <i data-lucide="alert-circle" class="w-4 h-4 mr-2"></i>
                         Failed to load prompts: ${err.message}
+                        <button class="ml-3 underline" onclick="refreshCheckboxPrompts()">Retry</button>
                     </div>
                 `;
                 lucide.createIcons();
@@ -2085,8 +1848,20 @@ Students recognise to stop titration after 2 consistent results (consistent to 0
                 document.getElementById('editCheckboxPromptId').value = prompt._id;
                 document.getElementById('newCheckboxPromptTitle').value = prompt.title;
                 document.getElementById('newCheckboxPromptDescription').value = prompt.description || '';
-                document.getElementById('newCheckboxPromptContent').value = prompt.content;
-                document.getElementById('newCheckboxPromptScenario').value = prompt.scenario || '';
+                // Derive scenario/content from stored prompt. Prefer explicit scenario field; if missing, parse from content header
+                (function populateScenarioAndContent() {
+                    let scenarioVal = (prompt.scenario || '').trim();
+                    let contentVal = (prompt.content || '').trim();
+                    if (!scenarioVal && contentVal) {
+                        const lines = contentVal.split('\n').filter(l => l.trim().length > 0);
+                        if (lines.length > 0 && /^\s*scenario\s*:/i.test(lines[0])) {
+                            scenarioVal = lines[0].replace(/^\s*scenario\s*:\s*/i, '').trim();
+                            contentVal = lines.slice(1).join('\n');
+                        }
+                    }
+                    document.getElementById('newCheckboxPromptScenario').value = scenarioVal;
+                    document.getElementById('newCheckboxPromptContent').value = contentVal;
+                })();
                 document.getElementById('newCheckboxPromptCategory').value = prompt.category;
                 document.getElementById('newCheckboxPromptTags').value = prompt.tags ? prompt.tags.join(', ') : '';
                 document.getElementById('newCheckboxPromptVisibility').value = prompt.isPublic.toString();
@@ -2125,7 +1900,7 @@ Students recognise to stop titration after 2 consistent results (consistent to 0
         
         // Handle create/edit checkbox prompt form submission
         async function handleCreateCheckboxPromptSubmit(e) {
-            e.preventDefault();
+            if (e && typeof e.preventDefault === 'function') e.preventDefault();
             
             const promptId = document.getElementById('editCheckboxPromptId').value;
             const isEdit = Boolean(promptId);
@@ -2133,8 +1908,14 @@ Students recognise to stop titration after 2 consistent results (consistent to 0
             const formData = {
                 title: document.getElementById('newCheckboxPromptTitle').value,
                 description: document.getElementById('newCheckboxPromptDescription').value,
-                content: document.getElementById('newCheckboxPromptContent').value,
+                // Persist scenario explicitly AND redundantly as first line of content for compatibility
                 scenario: document.getElementById('newCheckboxPromptScenario').value,
+                content: (() => {
+                    const sc = document.getElementById('newCheckboxPromptScenario').value.trim();
+                    const body = document.getElementById('newCheckboxPromptContent').value.trim();
+                    if (sc) return `Scenario: ${sc}\n${body}`;
+                    return body;
+                })(),
                 category: document.getElementById('newCheckboxPromptCategory').value,
                 mode: document.getElementById('newCheckboxPromptMode').value,
                 tags: document.getElementById('newCheckboxPromptTags').value.split(',').map(tag => tag.trim()).filter(tag => tag),
@@ -2155,14 +1936,14 @@ Students recognise to stop titration after 2 consistent results (consistent to 0
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 
                 const result = await response.json();
-                
                 showCriteriaFeedback(`✅ ${isEdit ? 'Updated' : 'Created'} checkbox prompt: "${formData.title}"`, 'success');
                 closeCreateCheckboxPromptModal();
                 refreshCheckboxPrompts();
-                
+                return false;
             } catch (err) {
                 console.error('❌ Failed to save checkbox prompt:', err);
                 alert(`Failed to save prompt: ${err.message}`);
+                return false;
             }
         }
         

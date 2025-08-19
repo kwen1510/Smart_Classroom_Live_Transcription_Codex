@@ -690,8 +690,8 @@ app.get("/api/transcripts/:code/:number", async (req, res) => {
       return res.status(404).json({ error: "Group not found" });
     }
     
-    // Get all transcripts for this group
-    const transcripts = await db.collection("transcripts").find({ group_id: group._id }).sort({ created_at: -1 }).limit(50).toArray();
+    // Get all transcripts for this group (no limit for full "Show All")
+    const transcripts = await db.collection("transcripts").find({ group_id: group._id }).sort({ created_at: -1 }).toArray();
     
     // Get the latest summary
     const summary = await db.collection("summaries").findOne({ group_id: group._id });
@@ -3345,31 +3345,39 @@ Begin evaluation now:`;
 
     const response = await res.json();
     const responseText = response.content?.[0]?.text?.trim();
-    
+
     console.log(`🔍 Anthropic response text: "${responseText?.substring(0, 300)}..."`);
-    
-    let result;
-    try {
-      // Try to parse the JSON response
-      result = JSON.parse(responseText ?? '{"matches": []}');
-    } catch (parseError) {
-      console.error("❌ JSON parse error:", parseError.message);
-      console.error("🔍 Raw response text:", responseText);
-      
-      // Try to extract JSON from the response if it's wrapped in other text
-      const jsonMatch = responseText?.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        try {
-          result = JSON.parse(jsonMatch[0]);
-          console.log("✅ Recovered JSON from wrapped response");
-        } catch (secondError) {
-          console.error("❌ Could not parse extracted JSON either");
-          result = { matches: [] };
-        }
+
+    // Robust JSON extraction that tolerates Markdown code fences and extra text
+    const extractJson = (text) => {
+      if (!text || typeof text !== 'string') return null;
+      let t = text.trim();
+      // Remove fenced blocks ```json ... ```
+      const fenced = t.match(/```(?:json)?\s*([\s\S]*?)```/i);
+      if (fenced) {
+        t = fenced[1].trim();
       } else {
-        result = { matches: [] };
+        // Strip stray leading/trailing backticks
+        t = t.replace(/^```(?:json)?/i, '').replace(/```$/i, '').trim();
       }
-    }
+      // Direct parse first
+      try {
+        return JSON.parse(t);
+      } catch (_) {
+        // Fallback: extract first JSON object substring
+        const m = t.match(/\{[\s\S]*\}/);
+        if (m) {
+          try {
+            return JSON.parse(m[0]);
+          } catch (_) {
+            return null;
+          }
+        }
+        return null;
+      }
+    };
+
+    let result = extractJson(responseText) || { matches: [] };
     
     // Validate the result structure
     if (!result || typeof result !== 'object') {
@@ -3434,33 +3442,57 @@ Begin evaluation now:`;
       return true;
     });
     
-    // Detect and warn about duplicate quotes (same quote assigned to multiple criteria)
-    const quoteMap = new Map();
-    result.matches.forEach(match => {
-      if (match.quote && match.status !== 'grey') {
-        const trimmedQuote = match.quote.trim();
-        if (quoteMap.has(trimmedQuote)) {
-          console.warn(`🚨 DUPLICATE QUOTE DETECTED: Quote "${trimmedQuote.substring(0, 50)}..." assigned to multiple criteria: ${quoteMap.get(trimmedQuote)} and ${match.criteria_index}`);
+    // Detect and fix duplicate or near-duplicate quotes across criteria
+    const normalizeQuote = (q) => (q || '')
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, ' ') // strip punctuation
+      .replace(/\s+/g, ' ') // collapse whitespace
+      .trim();
+
+    const nonGrey = result.matches.filter(m => m.status !== 'grey' && typeof m.quote === 'string');
+    const seen = new Map(); // normQuote -> {index, score}
+    const toGrey = new Set();
+
+    // token overlap scorer reused later; define here for selection
+    const scoreOverlapFast = (quote, idx) => {
+      if (!quote) return 0;
+      const qt = (quote || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean);
+      const dict = new Set((`${criteria[idx]?.description || ''} ${criteria[idx]?.rubric || ''}`).toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean));
+      let s = 0; for (const t of qt) if (dict.has(t)) s++;
+      return s;
+    };
+
+    for (const m of nonGrey) {
+      const norm = normalizeQuote(m.quote);
+      if (!norm) { continue; }
+      // Consider substring duplicates too
+      let duplicateKey = null;
+      for (const key of seen.keys()) {
+        if (key.includes(norm) || norm.includes(key)) { duplicateKey = key; break; }
+      }
+      const keyToUse = duplicateKey || norm;
+      if (!seen.has(keyToUse)) {
+        seen.set(keyToUse, { index: m.criteria_index, score: scoreOverlapFast(m.quote, m.criteria_index) });
+      } else {
+        const prev = seen.get(keyToUse);
+        const currentScore = scoreOverlapFast(m.quote, m.criteria_index);
+        // Keep the better-scoring mapping; grey out the other
+        if (currentScore > prev.score) {
+          // grey the previous winner
+          toGrey.add(prev.index);
+          seen.set(keyToUse, { index: m.criteria_index, score: currentScore });
         } else {
-          quoteMap.set(trimmedQuote, match.criteria_index);
+          toGrey.add(m.criteria_index);
         }
       }
-    });
-    
-    // If we have duplicate quotes, mark all but the first as grey
-    if (quoteMap.size < result.matches.filter(m => m.status !== 'grey').length) {
-      console.warn(`🔧 Fixing duplicate quotes by marking duplicates as grey`);
-      const seenQuotes = new Set();
-      result.matches.forEach(match => {
-        if (match.quote && match.status !== 'grey') {
-          const trimmedQuote = match.quote.trim();
-          if (seenQuotes.has(trimmedQuote)) {
-            console.warn(`🔧 Marking criteria ${match.criteria_index} as grey due to duplicate quote`);
-            match.status = 'grey';
-            match.quote = null;
-          } else {
-            seenQuotes.add(trimmedQuote);
-          }
+    }
+
+    if (toGrey.size > 0) {
+      console.warn(`🔧 Resolving duplicate quotes across criteria. Greying: [${Array.from(toGrey).join(', ')}]`);
+      result.matches.forEach(m => {
+        if (toGrey.has(m.criteria_index)) {
+          m.status = 'grey';
+          m.quote = null;
         }
       });
     }
